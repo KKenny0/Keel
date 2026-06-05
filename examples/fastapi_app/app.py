@@ -9,13 +9,48 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from keel_runtime import AgentSpec, JobManager, PiRpcRuntime, S3ObjectStorage
-from keel_runtime.errors import JobNotFoundError
+from keel_runtime import (
+    AgentSpec,
+    CleanupPolicy,
+    DockerRuntime,
+    JobManager,
+    KubernetesPodRuntime,
+    PiRpcRuntime,
+    S3ObjectStorage,
+)
+from keel_runtime.errors import InvalidJobStateError, JobNotFoundError
 
 
-def _runtime_from_env() -> PiRpcRuntime:
+def _env_bool(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _runtime_from_env():
+    mode = os.getenv("KEEL_RUNTIME", "local").strip().lower()
     command = os.getenv("KEEL_PI_COMMAND")
-    return PiRpcRuntime(command=shlex.split(command) if command else None)
+    parsed_command = shlex.split(command) if command else None
+    if mode == "docker":
+        image = os.environ["KEEL_DOCKER_IMAGE"]
+        docker_command = os.getenv("KEEL_DOCKER_COMMAND")
+        return DockerRuntime(
+            image=image,
+            command=parsed_command,
+            docker_command=shlex.split(docker_command) if docker_command else None,
+            network=os.getenv("KEEL_DOCKER_NETWORK"),
+        )
+    if mode == "kubernetes":
+        image = os.environ["KEEL_K8S_IMAGE"]
+        pvc_name = os.environ["KEEL_K8S_PVC"]
+        kubectl_command = os.getenv("KEEL_KUBECTL_COMMAND")
+        return KubernetesPodRuntime(
+            image=image,
+            pvc_name=pvc_name,
+            command=parsed_command,
+            kubectl_command=shlex.split(kubectl_command) if kubectl_command else None,
+            namespace=os.getenv("KEEL_K8S_NAMESPACE"),
+            secret_name=os.getenv("KEEL_K8S_SECRET_NAME", "keel-agent-secrets"),
+        )
+    return PiRpcRuntime(command=parsed_command)
 
 
 def _object_storage_from_env():
@@ -24,11 +59,21 @@ def _object_storage_from_env():
     return S3ObjectStorage.from_env()
 
 
+def _cleanup_policy_from_env() -> CleanupPolicy:
+    return CleanupPolicy(
+        remove_workspace_on_success=_env_bool("KEEL_CLEAN_WORKSPACE_ON_SUCCESS"),
+        remove_workspace_on_failure=_env_bool("KEEL_CLEAN_WORKSPACE_ON_FAILURE"),
+        remove_artifacts_on_success=_env_bool("KEEL_CLEAN_ARTIFACTS_ON_SUCCESS"),
+        remove_artifacts_on_failure=_env_bool("KEEL_CLEAN_ARTIFACTS_ON_FAILURE"),
+    )
+
+
 app = FastAPI(title="Keel Runtime Example")
 manager = JobManager(
     root=os.getenv("KEEL_DATA_DIR", ".keel"),
     runtime=_runtime_from_env(),
     object_storage=_object_storage_from_env(),
+    cleanup_policy=_cleanup_policy_from_env(),
 )
 
 
@@ -107,6 +152,16 @@ def get_job_record(job_id: str) -> dict[str, Any]:
 def export_job(job_id: str) -> dict[str, str]:
     try:
         return {"path": str(manager.export_job(job_id))}
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/jobs/{job_id}/cleanup")
+def cleanup_job(job_id: str) -> dict[str, list[str]]:
+    try:
+        return {"removed": manager.cleanup_job(job_id)}
+    except InvalidJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except JobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

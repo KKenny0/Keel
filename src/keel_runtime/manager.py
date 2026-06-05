@@ -8,11 +8,13 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from keel_runtime.errors import StorageSyncError
+from keel_runtime.cleanup import CleanupPolicy
+from keel_runtime.errors import RuntimeExecutionError, StorageSyncError
 from keel_runtime.events import EventType, JobEvent, utc_now
 from keel_runtime.jobs import AgentJob, JobStatus
 from keel_runtime.object_storage import ObjectStorage
 from keel_runtime.runtime import AgentRuntime, PiRpcRuntime, resolve_store_path
+from keel_runtime.security import redact_data, redact_text
 from keel_runtime.specs import AgentSpec
 from keel_runtime.stores import LocalStores
 
@@ -23,14 +25,18 @@ class JobManager:
         root: str | Path | None = None,
         runtime: AgentRuntime | None = None,
         object_storage: ObjectStorage | None = None,
+        cleanup_policy: CleanupPolicy | None = None,
     ) -> None:
         self.root = resolve_store_path(root)
         self.stores = LocalStores(self.root)
         self.runtime = runtime or PiRpcRuntime()
         self.object_storage = object_storage
+        self.cleanup_policy = cleanup_policy or CleanupPolicy()
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._queues: dict[str, asyncio.Queue[JobEvent | None]] = {}
         self._stop_requested: set[str] = set()
+        self._runtime_specs: dict[str, AgentSpec] = {}
+        self._secret_values: dict[str, list[str]] = {}
         self._mark_unfinished_jobs_restorable()
 
     def create_job(
@@ -40,6 +46,8 @@ class JobManager:
         workspace: str | Path | None = None,
     ) -> str:
         job_id = uuid.uuid4().hex
+        self._runtime_specs[job_id] = spec
+        self._secret_values[job_id] = spec.secret_values()
         self.stores.ensure_job(job_id)
         workspace_path = self.stores.workspaces.create(job_id, workspace)
         now = utc_now()
@@ -85,7 +93,7 @@ class JobManager:
             for event in self.stores.sessions.read(job_id):
                 yield event
             return
-        job.with_status(JobStatus.CREATED, error=None)
+        job.with_status(JobStatus.CREATED, error=None, exit_code=None, timed_out=False)
         self.stores.jobs.save(job)
         self._append_event(JobEvent.status(job_id, "job resumed", status=JobStatus.CREATED.value))
         async for event in self.stream(job_id):
@@ -111,6 +119,8 @@ class JobManager:
             await self._publish(job_id, stopped_event)
             await self._finish_queue(job_id)
             self._stop_requested.discard(job_id)
+            self._runtime_specs.pop(job_id, None)
+            self._secret_values.pop(job_id, None)
             return JobStatus.STOPPED
 
         await self.runtime.stop(job_id)
@@ -159,9 +169,23 @@ class JobManager:
         except Exception as exc:
             raise StorageSyncError(f"object storage restore failed: {exc}") from exc
 
+    def cleanup_job(
+        self,
+        job_id: str,
+        *,
+        remove_workspace: bool = True,
+        remove_artifacts: bool = False,
+    ) -> list[str]:
+        return self.stores.cleanup_job(
+            job_id,
+            remove_workspace=remove_workspace,
+            remove_artifacts=remove_artifacts,
+        )
+
     async def _run(self, job_id: str) -> None:
         output: list[str] = []
         job = self.stores.jobs.load(job_id)
+        spec = self._runtime_specs.get(job_id, job.spec)
         job.with_status(JobStatus.RUNNING)
         self.stores.jobs.save(job)
         await self._record_and_publish(
@@ -169,7 +193,8 @@ class JobManager:
         )
 
         try:
-            async for event in self.runtime.run(job, job.spec):
+            async for event in self.runtime.run(job, spec):
+                event = self._sanitize_event(event)
                 if event.type == EventType.OUTPUT:
                     output.append(event.message)
                 await self._record_and_publish(event)
@@ -189,7 +214,7 @@ class JobManager:
                 JobStatus.STOPPED if job_id in self._stop_requested else JobStatus.SUCCEEDED
             )
             job = self.stores.jobs.load(job_id)
-            job.with_status(final_status, result=result)
+            job.with_status(final_status, result=result, exit_code=None, timed_out=False)
             self.stores.jobs.save(job)
             await self._record_and_publish(
                 JobEvent.status(job_id, f"job {final_status.value}", status=final_status.value)
@@ -203,15 +228,33 @@ class JobManager:
                         object_count=len(uploaded_keys),
                     )
                 )
+            await self._apply_cleanup_policy(job_id, final_status)
         except Exception as exc:
             job = self.stores.jobs.load(job_id)
-            job.with_status(JobStatus.FAILED, error=str(exc))
+            error = self._redact_text(job_id, str(exc))
+            exit_code = exc.exit_code if isinstance(exc, RuntimeExecutionError) else None
+            timed_out = exc.timed_out if isinstance(exc, RuntimeExecutionError) else False
+            job.with_status(
+                JobStatus.FAILED,
+                error=error,
+                exit_code=exit_code,
+                timed_out=timed_out,
+            )
             self.stores.jobs.save(job)
             await self._record_and_publish(
-                JobEvent.error(job_id, str(exc), status=JobStatus.FAILED.value)
+                JobEvent.error(
+                    job_id,
+                    error,
+                    status=JobStatus.FAILED.value,
+                    exit_code=exit_code,
+                    timed_out=timed_out,
+                )
             )
+            await self._apply_cleanup_policy(job_id, JobStatus.FAILED)
         finally:
             self._stop_requested.discard(job_id)
+            self._runtime_specs.pop(job_id, None)
+            self._secret_values.pop(job_id, None)
             await self._finish_queue(job_id)
             self._tasks.pop(job_id, None)
             self._queues.pop(job_id, None)
@@ -230,9 +273,10 @@ class JobManager:
                 )
 
     def _append_event(self, event: JobEvent) -> None:
-        self.stores.sessions.append(event)
+        self.stores.sessions.append(self._sanitize_event(event))
 
     async def _record_and_publish(self, event: JobEvent) -> None:
+        event = self._sanitize_event(event)
         self._append_event(event)
         await self._publish(event.job_id, event)
 
@@ -245,3 +289,33 @@ class JobManager:
         queue = self._queues.get(job_id)
         if queue is not None:
             await queue.put(None)
+
+    async def _apply_cleanup_policy(self, job_id: str, status: JobStatus) -> None:
+        remove_workspace = self.cleanup_policy.workspace_for_status(status)
+        remove_artifacts = self.cleanup_policy.artifacts_for_status(status)
+        if not remove_workspace and not remove_artifacts:
+            return
+        removed = self.cleanup_job(
+            job_id,
+            remove_workspace=remove_workspace,
+            remove_artifacts=remove_artifacts,
+        )
+        if removed:
+            await self._record_and_publish(
+                JobEvent.status(job_id, "job cleaned", removed=removed)
+            )
+
+    def _sanitize_event(self, event: JobEvent) -> JobEvent:
+        secrets = self._secret_values.get(event.job_id, [])
+        if not secrets:
+            return event
+        return JobEvent(
+            job_id=event.job_id,
+            type=event.type,
+            message=redact_text(event.message, secrets),
+            data=redact_data(event.data, secrets),
+            created_at=event.created_at,
+        )
+
+    def _redact_text(self, job_id: str, text: str) -> str:
+        return redact_text(text, self._secret_values.get(job_id, []))

@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from keel_runtime.errors import JobNotFoundError
+from keel_runtime.errors import InvalidJobStateError, JobNotFoundError
 from keel_runtime.events import JobEvent
 from keel_runtime.jobs import AgentJob
 from keel_runtime.object_storage import ObjectStorage
@@ -298,6 +298,34 @@ class LocalStores:
         job.artifact_path = str(self.layout.artifact_dir(job_id))
         self.jobs.save(job)
         return job
+
+    def cleanup_job(
+        self,
+        job_id: str,
+        *,
+        remove_workspace: bool = True,
+        remove_artifacts: bool = False,
+    ) -> list[str]:
+        job = self.jobs.load(job_id)
+        if not job.status.is_terminal:
+            raise InvalidJobStateError(f"Cannot clean up non-terminal job: {job_id}")
+
+        removed: list[str] = []
+        targets: list[tuple[str, Path]] = []
+        if remove_workspace:
+            targets.append(("workspace", self.layout.workspace_dir(job_id)))
+        if remove_artifacts:
+            targets.append(("artifacts", self.layout.artifact_dir(job_id)))
+
+        job_root = self.layout.job_dir(job_id).resolve()
+        for label, target in targets:
+            resolved_target = target.resolve()
+            if job_root != resolved_target and job_root not in resolved_target.parents:
+                raise ValueError(f"Cleanup target escapes job root: {target}")
+            if resolved_target.exists():
+                shutil.rmtree(resolved_target)
+                removed.append(label)
+        return removed
 
     @staticmethod
     def _file_records(root: Path) -> list[dict[str, Any]]:

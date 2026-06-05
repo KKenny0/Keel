@@ -10,6 +10,8 @@ from typing import Any
 from keel_runtime.events import utc_now
 from keel_runtime.specs import AgentSpec
 
+_NOT_SET = object()
+
 
 class JobStatus(StrEnum):
     CREATED = "created"
@@ -38,6 +40,8 @@ class AgentJob:
     updated_at: datetime
     result: str | None = None
     error: str | None = None
+    exit_code: int | None = None
+    timed_out: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -52,6 +56,8 @@ class AgentJob:
             "updated_at": self.updated_at.isoformat(),
             "result": self.result,
             "error": self.error,
+            "exit_code": self.exit_code,
+            "timed_out": self.timed_out,
         }
 
     @classmethod
@@ -68,19 +74,27 @@ class AgentJob:
             updated_at=datetime.fromisoformat(data["updated_at"]),
             result=data.get("result"),
             error=data.get("error"),
+            exit_code=data.get("exit_code"),
+            timed_out=bool(data.get("timed_out", False)),
         )
 
     def with_status(
         self,
         status: JobStatus,
         *,
-        result: str | None = None,
-        error: str | None = None,
+        result: str | None | object = _NOT_SET,
+        error: str | None | object = _NOT_SET,
+        exit_code: int | None | object = _NOT_SET,
+        timed_out: bool | object = _NOT_SET,
     ) -> AgentJob:
         self.status = status
         self.updated_at = utc_now()
-        if result is not None:
+        if result is not _NOT_SET:
             self.result = result
-        if error is not None:
+        if error is not _NOT_SET:
             self.error = error
+        if exit_code is not _NOT_SET:
+            self.exit_code = exit_code
+        if timed_out is not _NOT_SET:
+            self.timed_out = bool(timed_out)
         return self

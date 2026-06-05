@@ -10,7 +10,7 @@ Keel 的定位是：**让 Python 后端把 Agent 任务交给 pi 运行，并负
 
 它不是新的 Agent 框架，不负责教用户怎么编排 Agent；它只解决生产系统里最难收拾的部分：任务在哪里跑、现场怎么保存、失败怎么恢复、结果怎么拿回来。
 
-第一版目标：**FastAPI 服务提交一个 Agent Job，本地跑通 pi RPC，支持流式输出、停止、会话保存、工作区保存、重启后查询历史任务。**
+当前已完成到 Phase 3：**FastAPI 服务提交一个 Agent Job，本地跑通 pi RPC，支持流式输出、停止、会话保存、工作区保存、重启后查询历史任务，并支持 Docker、Kubernetes Pod + PVC、超时、资源限制和任务清理。**
 
 ## Product Rules
 

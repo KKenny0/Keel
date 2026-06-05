@@ -22,7 +22,14 @@ Phase 2 已完成：持久化和恢复。
 - 支持把任务状态、会话、工作区、产物同步到 S3/MinIO 这类对象存储。
 - 对象存储不可用时，任务会进入明确失败状态。
 
-当前暂不包含多 Agent、任务编排、Kubernetes、RAG 平台或可视化管理台。
+Phase 3 已完成：生产运行边界。
+
+- 支持本地进程、Docker 和 Kubernetes Pod + PVC 三种运行方式。
+- 支持超时自动停止、资源限制、环境变量注入和失败原因记录。
+- 支持任务结束后清理工作区或产物。
+- 任务记录、日志和产物会遮盖常见密钥值。
+
+当前暂不包含多 Agent、任务编排、RAG 平台或可视化管理台。
 
 ## 目录结构
 
@@ -38,6 +45,8 @@ keel/
       specs.py
       jobs.py
       runtime.py
+      security.py
+      cleanup.py
       stores.py
       events.py
       errors.py
@@ -98,6 +107,26 @@ $env:KEEL_S3_PREFIX = "keel"
 $env:KEEL_S3_ENDPOINT_URL = "http://127.0.0.1:9000"
 ```
 
+如果需要切换运行方式：
+
+```powershell
+$env:KEEL_RUNTIME = "docker"
+$env:KEEL_DOCKER_IMAGE = "your-agent-image"
+```
+
+```powershell
+$env:KEEL_RUNTIME = "kubernetes"
+$env:KEEL_K8S_IMAGE = "your-agent-image"
+$env:KEEL_K8S_PVC = "keel-pvc"
+$env:KEEL_K8S_NAMESPACE = "agents"
+```
+
+如果需要任务结束后自动清理工作区：
+
+```powershell
+$env:KEEL_CLEAN_WORKSPACE_ON_SUCCESS = "true"
+```
+
 ## 最小 Python 用法
 
 ```python
@@ -129,10 +158,10 @@ asyncio.run(main())
 
 ## 当前限制
 
-- Phase 2 已落地持久化和恢复。
+- Phase 3 已落地生产运行边界。
 - 第一版只面向本地单 Agent 任务。
 - 底层 Agent 能力复用 pi，不重写 Agent 内核。
 - 默认运行命令是 `pi rpc run`，本地没有 pi 时可以传入自定义命令做测试或适配。
 - 默认持久化目标是本地文件系统。
 - LangGraph、OpenAI Agents SDK、CrewAI、AutoGen 不作为核心依赖。
-- Docker、Kubernetes、多任务依赖和多 Agent 协作属于后续阶段。
+- 多任务依赖和多 Agent 协作属于后续阶段。
