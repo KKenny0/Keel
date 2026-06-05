@@ -10,7 +10,7 @@ Keel 的定位是：**让 Python 后端把 Agent 任务交给 pi 运行，并负
 
 它不是新的 Agent 框架，不负责教用户怎么编排 Agent；它只解决生产系统里最难收拾的部分：任务在哪里跑、现场怎么保存、失败怎么恢复、结果怎么拿回来。
 
-当前已完成到 Phase 4.1：**FastAPI 服务提交一个 Agent Job，本地跑通 pi RPC，支持流式输出、停止、会话保存、工作区保存、重启后查询历史任务，并支持 Docker、Kubernetes Pod + PVC、超时、资源限制、任务清理、多任务依赖、前置产物传递和结构化模型 API 配置。**
+当前已完成到 Phase 5：**FastAPI 服务提交一个 Agent Job，本地跑通 pi RPC，支持流式输出、停止、会话保存、工作区保存、重启后查询历史任务，并支持 Docker、Kubernetes Pod + PVC、超时、资源限制、任务清理、多任务依赖、前置产物传递、结构化模型 API 配置和轻量多 Agent 协作。**
 
 ## Product Rules
 
@@ -18,7 +18,7 @@ Keel 的定位是：**让 Python 后端把 Agent 任务交给 pi 运行，并负
 
 - 只做 Agent 运行底座，不做泛 Agent 框架。
 - 复用 pi，不重写 Agent 内核。
-- 第一版只做单 Agent。
+- 多 Agent 只做运行协作入口，不做通用工作流平台。
 - 第一版不接 LangGraph、OpenAI Agents SDK、CrewAI、AutoGen。
 - 每个任务必须有独立工作区。
 - 会话、工作区、产物、任务状态要分开保存。
@@ -75,12 +75,19 @@ keel/
 - `SessionStore`：保存和读取会话历史。
 - `WorkspaceStore`：创建、保存、恢复工作区。
 - `ArtifactStore`：保存和列出产物。
+- `Collaboration` / `CollaborationStep`：记录一次多 Agent 协作目标和每个 Agent 步骤。
 
 最小 API：
 
 ```python
 create_job(spec, input, workspace=None) -> job_id
 create_task(spec, input, dependencies=None, artifact_inputs=None) -> job_id
+create_collaboration(goal, workspace=None, context=None) -> collaboration_id
+add_collaboration_step(collaboration_id, spec, input, dependencies=None, artifact_inputs=None) -> step_id
+confirm_collaboration_step(collaboration_id, step_id) -> job_id
+retry_collaboration_step(collaboration_id, step_id) -> job_id
+resume_collaboration_step(collaboration_id, step_id) -> event stream
+describe_collaboration(collaboration_id) -> dict
 stream(job_id) -> event stream
 stop(job_id) -> status
 resume(job_id) -> event stream
@@ -189,6 +196,8 @@ restorable
 
 ## Phase 5：Multi-Agent Collaboration
 
+状态：已完成（2026-06-05）
+
 目标：多个 Agent 围绕一个目标协作。
 
 实现内容：
@@ -198,6 +207,14 @@ restorable
 - 支持任务之间传递上下文和产物。
 - 支持失败重试。
 - 支持恢复到中间状态继续。
+
+已实现内容：
+
+- `Collaboration` 和 `CollaborationStep` 本地持久化。
+- 每次协作保存项目工作区快照，每个步骤仍创建独立任务工作区。
+- `JobManager` 支持创建协作、添加步骤、确认步骤、重试步骤、恢复步骤、查询协作摘要。
+- 协作步骤记录 Agent 名称、输入、依赖、产物输入、确认记录、每次尝试的 job 和事件。
+- FastAPI 示例提供 `/collaborations` 和协作 step 入口。
 
 验收标准：
 

@@ -9,7 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from keel_runtime.cleanup import CleanupPolicy
-from keel_runtime.errors import DependencyError, RuntimeExecutionError, StorageSyncError
+from keel_runtime.collaboration import (
+    Collaboration,
+    CollaborationStatus,
+    CollaborationStep,
+    CollaborationStepStatus,
+)
+from keel_runtime.errors import (
+    DependencyError,
+    InvalidJobStateError,
+    RuntimeExecutionError,
+    StorageSyncError,
+)
 from keel_runtime.events import EventType, JobEvent, utc_now
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.models import ModelConfig, ProviderRegistry, parse_model_usage
@@ -41,6 +52,7 @@ class JobManager:
         self._runtime_specs: dict[str, AgentSpec] = {}
         self._secret_values: dict[str, list[str]] = {}
         self._mark_unfinished_jobs_restorable()
+        self._sync_all_collaborations()
 
     def create_job(
         self,
@@ -95,6 +107,210 @@ class JobManager:
             artifact_inputs=artifact_inputs,
         )
 
+    def create_collaboration(
+        self,
+        goal: str,
+        workspace: str | Path | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        collaboration_id = uuid.uuid4().hex
+        workspace_path = self.stores.create_collaboration_workspace(collaboration_id, workspace)
+        now = utc_now()
+        collaboration = Collaboration(
+            id=collaboration_id,
+            goal=goal,
+            status=CollaborationStatus.CREATED,
+            project_workspace_path=str(workspace_path),
+            context=dict(context or {}),
+            steps=[],
+            created_at=now,
+            updated_at=now,
+        )
+        self.stores.collaborations.save(collaboration)
+        return collaboration_id
+
+    def list_collaborations(self) -> list[Collaboration]:
+        collaborations: list[Collaboration] = []
+        for collaboration in self.stores.collaborations.list():
+            collaborations.append(self._sync_collaboration(collaboration))
+        return collaborations
+
+    def get_collaboration(self, collaboration_id: str) -> Collaboration:
+        collaboration = self.stores.collaborations.load(collaboration_id)
+        return self._sync_collaboration(collaboration)
+
+    def describe_collaboration(self, collaboration_id: str) -> dict[str, Any]:
+        collaboration = self.get_collaboration(collaboration_id)
+        return {
+            "collaboration": {
+                "id": collaboration.id,
+                "goal": collaboration.goal,
+                "status": collaboration.status.value,
+                "project_workspace_path": collaboration.project_workspace_path,
+                "context": dict(collaboration.context),
+                "created_at": collaboration.created_at.isoformat(),
+                "updated_at": collaboration.updated_at.isoformat(),
+            },
+            "steps": [
+                self._describe_collaboration_step(collaboration, step)
+                for step in collaboration.steps
+            ],
+        }
+
+    def update_collaboration_context(
+        self,
+        collaboration_id: str,
+        context: dict[str, Any],
+    ) -> Collaboration:
+        collaboration = self.get_collaboration(collaboration_id)
+        collaboration.context.update(context)
+        collaboration.updated_at = utc_now()
+        self.stores.collaborations.save(collaboration)
+        return collaboration
+
+    def add_collaboration_step(
+        self,
+        collaboration_id: str,
+        spec: AgentSpec,
+        input: Any,
+        *,
+        dependencies: list[str] | None = None,
+        artifact_inputs: list[ArtifactInput | dict[str, Any]] | None = None,
+        requires_confirmation: bool = False,
+        max_attempts: int = 2,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        collaboration = self.get_collaboration(collaboration_id)
+        normalized_artifact_inputs = self._normalize_artifact_inputs(artifact_inputs)
+        normalized_dependencies = self._normalize_dependencies(
+            dependencies,
+            normalized_artifact_inputs,
+        )
+        now = utc_now()
+        step = CollaborationStep(
+            id=uuid.uuid4().hex,
+            agent_name=spec.name,
+            spec=spec,
+            input=input,
+            status=(
+                CollaborationStepStatus.WAITING_FOR_CONFIRMATION
+                if requires_confirmation
+                else CollaborationStepStatus.PENDING
+            ),
+            created_at=now,
+            updated_at=now,
+            dependencies=normalized_dependencies,
+            artifact_inputs=normalized_artifact_inputs,
+            requires_confirmation=requires_confirmation,
+            max_attempts=max_attempts,
+            context=dict(context or {}),
+        )
+        collaboration.steps.append(step)
+        if not requires_confirmation:
+            job_id = self._create_collaboration_job(collaboration, step)
+            step.job_ids.append(job_id)
+            step.with_status(CollaborationStepStatus.CREATED)
+        self._save_synced_collaboration(collaboration)
+        return step.id
+
+    def get_collaboration_step(
+        self,
+        collaboration_id: str,
+        step_id: str,
+    ) -> CollaborationStep:
+        collaboration = self.get_collaboration(collaboration_id)
+        return self._find_collaboration_step(collaboration, step_id)
+
+    def confirm_collaboration_step(
+        self,
+        collaboration_id: str,
+        step_id: str,
+        *,
+        note: str | None = None,
+    ) -> str:
+        collaboration = self.get_collaboration(collaboration_id)
+        step = self._find_collaboration_step(collaboration, step_id)
+        if not step.requires_confirmation:
+            raise InvalidJobStateError(
+                f"Collaboration step does not require confirmation: {step_id}"
+            )
+        if step.job_id is not None:
+            return step.job_id
+        step.confirmed_at = utc_now()
+        step.confirmation_note = note
+        job_id = self._create_collaboration_job(collaboration, step)
+        step.job_ids.append(job_id)
+        step.with_status(CollaborationStepStatus.CREATED)
+        self._append_event(
+            JobEvent.status(
+                job_id,
+                "collaboration step confirmed",
+                collaboration_id=collaboration.id,
+                step_id=step.id,
+                note=note,
+            )
+        )
+        self._save_synced_collaboration(collaboration)
+        return job_id
+
+    async def stream_collaboration_step(
+        self,
+        collaboration_id: str,
+        step_id: str,
+    ) -> AsyncIterator[JobEvent]:
+        job_id = self._collaboration_step_job_id(collaboration_id, step_id)
+        async for event in self.stream(job_id):
+            yield event
+        self._sync_collaborations_for_job(job_id)
+
+    async def resume_collaboration_step(
+        self,
+        collaboration_id: str,
+        step_id: str,
+    ) -> AsyncIterator[JobEvent]:
+        job_id = self._collaboration_step_job_id(collaboration_id, step_id)
+        async for event in self.resume(job_id):
+            yield event
+        self._sync_collaborations_for_job(job_id)
+
+    def retry_collaboration_step(
+        self,
+        collaboration_id: str,
+        step_id: str,
+        *,
+        force: bool = False,
+    ) -> str:
+        collaboration = self.get_collaboration(collaboration_id)
+        step = self._find_collaboration_step(collaboration, step_id)
+        latest_job_id = step.job_id
+        if latest_job_id is None:
+            raise InvalidJobStateError(f"Collaboration step has no job to retry: {step_id}")
+        latest_job = self.stores.jobs.load(latest_job_id)
+        retryable_statuses = {JobStatus.FAILED, JobStatus.STOPPED, JobStatus.RESTORABLE}
+        if latest_job.status not in retryable_statuses and not force:
+            raise InvalidJobStateError(
+                f"Collaboration step is {latest_job.status.value}; retry is not allowed"
+            )
+        if step.attempt >= step.max_attempts:
+            raise InvalidJobStateError(
+                f"Collaboration step reached max attempts: {step.max_attempts}"
+            )
+        job_id = self._create_collaboration_job(collaboration, step)
+        step.job_ids.append(job_id)
+        step.with_status(CollaborationStepStatus.CREATED)
+        self._append_event(
+            JobEvent.status(
+                job_id,
+                "collaboration step retried",
+                collaboration_id=collaboration.id,
+                step_id=step.id,
+                retry_of=latest_job_id,
+                attempt=step.attempt,
+            )
+        )
+        self._save_synced_collaboration(collaboration)
+        return job_id
+
     async def stream(self, job_id: str) -> AsyncIterator[JobEvent]:
         job = self.stores.jobs.load(job_id)
         if job.status.is_terminal:
@@ -147,6 +363,7 @@ class JobManager:
             self._append_event(stopped_event)
             await self._publish(job_id, stopped_event)
             await self._finish_queue(job_id)
+            self._sync_collaborations_for_job(job_id)
             self._stop_requested.discard(job_id)
             self._runtime_specs.pop(job_id, None)
             self._secret_values.pop(job_id, None)
@@ -312,6 +529,7 @@ class JobManager:
             self._stop_requested.discard(job_id)
             self._runtime_specs.pop(job_id, None)
             self._secret_values.pop(job_id, None)
+            self._sync_collaborations_for_job(job_id)
             await self._finish_queue(job_id)
             self._tasks.pop(job_id, None)
             self._queues.pop(job_id, None)
@@ -415,6 +633,184 @@ class JobManager:
                 cost_usd=usage.cost_usd,
             )
         )
+
+    def _create_collaboration_job(
+        self,
+        collaboration: Collaboration,
+        step: CollaborationStep,
+    ) -> str:
+        attempt = step.attempt + 1
+        job_id = self.create_job(
+            step.spec,
+            self._collaboration_input(collaboration, step, attempt=attempt),
+            workspace=collaboration.project_workspace_path,
+            dependencies=step.dependencies,
+            artifact_inputs=step.artifact_inputs,
+        )
+        self._append_event(
+            JobEvent.status(
+                job_id,
+                "collaboration step attached",
+                collaboration_id=collaboration.id,
+                step_id=step.id,
+                goal=collaboration.goal,
+                agent_name=step.agent_name,
+                attempt=attempt,
+            )
+        )
+        return job_id
+
+    def _collaboration_input(
+        self,
+        collaboration: Collaboration,
+        step: CollaborationStep,
+        *,
+        attempt: int,
+    ) -> dict[str, Any]:
+        return {
+            "input": step.input,
+            "collaboration": {
+                "id": collaboration.id,
+                "goal": collaboration.goal,
+                "step_id": step.id,
+                "agent_name": step.agent_name,
+                "attempt": attempt,
+                "context": {**collaboration.context, **step.context},
+                "dependencies": list(step.dependencies),
+                "artifact_inputs": [
+                    artifact_input.to_dict() for artifact_input in step.artifact_inputs
+                ],
+            },
+        }
+
+    def _collaboration_step_job_id(self, collaboration_id: str, step_id: str) -> str:
+        collaboration = self.get_collaboration(collaboration_id)
+        step = self._find_collaboration_step(collaboration, step_id)
+        if step.job_id is None:
+            raise InvalidJobStateError(
+                f"Collaboration step is {step.status.value}; no job is available"
+            )
+        return step.job_id
+
+    @staticmethod
+    def _find_collaboration_step(
+        collaboration: Collaboration,
+        step_id: str,
+    ) -> CollaborationStep:
+        for step in collaboration.steps:
+            if step.id == step_id:
+                return step
+        raise InvalidJobStateError(f"Collaboration step not found: {step_id}")
+
+    def _describe_collaboration_step(
+        self,
+        collaboration: Collaboration,
+        step: CollaborationStep,
+    ) -> dict[str, Any]:
+        description = step.to_dict()
+        attempts: list[dict[str, Any]] = []
+        for attempt_number, job_id in enumerate(step.job_ids, start=1):
+            job = self.stores.jobs.load(job_id)
+            attempts.append(
+                {
+                    "attempt": attempt_number,
+                    "job_id": job.id,
+                    "status": job.status.value,
+                    "error": job.error,
+                    "exit_code": job.exit_code,
+                    "timed_out": job.timed_out,
+                    "artifacts": self.stores.artifacts.list(job.id),
+                    "events": [
+                        event.to_dict() for event in self.stores.sessions.read(job.id)
+                    ],
+                }
+            )
+        description["collaboration_id"] = collaboration.id
+        description["attempts"] = attempts
+        return description
+
+    def _save_synced_collaboration(self, collaboration: Collaboration) -> Collaboration:
+        synced = self._sync_collaboration(collaboration, save=False)
+        self.stores.collaborations.save(synced)
+        return synced
+
+    def _sync_all_collaborations(self) -> None:
+        for collaboration in self.stores.collaborations.list():
+            self._save_synced_collaboration(collaboration)
+
+    def _sync_collaborations_for_job(self, job_id: str) -> None:
+        for collaboration in self.stores.collaborations.list():
+            if any(job_id in step.job_ids for step in collaboration.steps):
+                self._save_synced_collaboration(collaboration)
+
+    def _sync_collaboration(
+        self,
+        collaboration: Collaboration,
+        *,
+        save: bool = True,
+    ) -> Collaboration:
+        changed = False
+        for step in collaboration.steps:
+            changed = self._sync_collaboration_step(step) or changed
+        status = self._derive_collaboration_status(collaboration.steps)
+        if collaboration.status != status:
+            collaboration.with_status(status)
+            changed = True
+        if changed and save:
+            self.stores.collaborations.save(collaboration)
+        return collaboration
+
+    def _sync_collaboration_step(self, step: CollaborationStep) -> bool:
+        status = self._expected_step_status(step)
+        if status == step.status:
+            return False
+        step.with_status(status)
+        return True
+
+    def _expected_step_status(self, step: CollaborationStep) -> CollaborationStepStatus:
+        if step.job_id is None:
+            if step.requires_confirmation and step.confirmed_at is None:
+                return CollaborationStepStatus.WAITING_FOR_CONFIRMATION
+            return CollaborationStepStatus.PENDING
+        job = self.stores.jobs.load(step.job_id)
+        return self._step_status_for_job_status(job.status)
+
+    @staticmethod
+    def _step_status_for_job_status(status: JobStatus) -> CollaborationStepStatus:
+        return {
+            JobStatus.CREATED: CollaborationStepStatus.CREATED,
+            JobStatus.RUNNING: CollaborationStepStatus.RUNNING,
+            JobStatus.STOPPING: CollaborationStepStatus.RUNNING,
+            JobStatus.STOPPED: CollaborationStepStatus.STOPPED,
+            JobStatus.SUCCEEDED: CollaborationStepStatus.SUCCEEDED,
+            JobStatus.FAILED: CollaborationStepStatus.FAILED,
+            JobStatus.RESTORABLE: CollaborationStepStatus.RESTORABLE,
+        }[status]
+
+    @staticmethod
+    def _derive_collaboration_status(
+        steps: list[CollaborationStep],
+    ) -> CollaborationStatus:
+        if not steps:
+            return CollaborationStatus.CREATED
+        statuses = {step.status for step in steps}
+        if CollaborationStepStatus.RESTORABLE in statuses:
+            return CollaborationStatus.RESTORABLE
+        active_statuses = {
+            CollaborationStepStatus.CREATED,
+            CollaborationStepStatus.RUNNING,
+            CollaborationStepStatus.PENDING,
+        }
+        if statuses & active_statuses:
+            return CollaborationStatus.RUNNING
+        if CollaborationStepStatus.WAITING_FOR_CONFIRMATION in statuses:
+            return CollaborationStatus.WAITING_FOR_CONFIRMATION
+        failed_statuses = {CollaborationStepStatus.FAILED, CollaborationStepStatus.STOPPED}
+        if statuses & failed_statuses:
+            return CollaborationStatus.FAILED
+        if statuses == {CollaborationStepStatus.SUCCEEDED}:
+            return CollaborationStatus.SUCCEEDED
+        return CollaborationStatus.CREATED
 
     def _normalize_artifact_inputs(
         self,

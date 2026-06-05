@@ -19,7 +19,7 @@
 | Phase 3：生产运行边界 | 已完成 | 2026-06-05 | 已完成本地进程超时控制、Docker 运行适配、Kubernetes Pod + PVC manifest 和日志流、资源限制、环境变量注入、任务清理、失败原因和退出状态记录、密钥遮盖。 |
 | Phase 4：任务接口和轻量编排入口 | 已完成 | 2026-06-05 | 已完成多任务创建入口、任务依赖、前置产物复制、前置失败阻止后续任务运行、统一任务摘要查询和 FastAPI 示例入口。 |
 | Phase 4.1：模型 API 配置层 | 已完成 | 2026-06-05 | 已完成结构化模型配置、声明式 fallback、模型配置 warning、任务级用量记录和密钥引用传递。 |
-| Phase 5：多 Agent 协作 | 未开始 | - | 多 Agent 协作尚未开始。 |
+| Phase 5：多 Agent 协作 | 已完成 | 2026-06-05 | 已完成协作目标、项目工作区快照、Agent 步骤记录、串行/并行步骤、人工确认、上下文和产物传递、失败重试、中间步骤恢复和 FastAPI 示例入口。 |
 | Phase 6：产品化和团队使用 | 未开始 | - | 团队视图、统计、审计和发布流程尚未开始。 |
 
 ## Key Changes
@@ -34,6 +34,7 @@ SDK 第一版提供这些核心对象和接口：
 - `WorkspaceStore`：负责保存和加载工作区。
 - `SessionStore`：负责保存和恢复会话历史。
 - `ArtifactStore`：负责保存任务产物。
+- `Collaboration` / `CollaborationStep`：记录一次多 Agent 协作目标和每个 Agent 步骤。
 - `JobManager`：负责创建、查询、停止、恢复任务。
 
 最小 API：
@@ -47,12 +48,19 @@ SDK 第一版提供这些核心对象和接口：
 - `download_artifact(job_id, path)`
 - `create_task(spec, input, dependencies, artifact_inputs)`
 - `describe_job(job_id)`
+- `create_collaboration(goal, workspace, context)`
+- `add_collaboration_step(collaboration_id, spec, input, dependencies, artifact_inputs)`
+- `confirm_collaboration_step(collaboration_id, step_id)`
+- `retry_collaboration_step(collaboration_id, step_id)`
+- `resume_collaboration_step(collaboration_id, step_id)`
+- `describe_collaboration(collaboration_id)`
 
 默认实现：
 
 - 本地目录存储。
 - pi RPC 本地进程运行。
-- 单 Agent、单任务工作区。
+- 单任务独立工作区。
+- 多 Agent 协作使用项目工作区快照。
 - FastAPI 示例。
 
 ## Implementation Phases
@@ -151,6 +159,8 @@ SDK 第一版提供这些核心对象和接口：
 - 不依赖外部 Agent 框架，也能跑简单多步骤流程。
 
 ### Phase 5：多 Agent 协作
+
+状态：已完成（2026-06-05）
 
 目标：支持多个 Agent 围绕同一个目标协作。
 

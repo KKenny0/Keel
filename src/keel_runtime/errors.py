@@ -9,6 +9,10 @@ class JobNotFoundError(KeelError):
     """Raised when a job id does not exist in the configured store."""
 
 
+class CollaborationNotFoundError(KeelError):
+    """Raised when a collaboration id does not exist in the configured store."""
+
+
 class InvalidJobStateError(KeelError):
     """Raised when an operation is not valid for the current job state."""
 

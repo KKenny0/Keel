@@ -9,7 +9,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from keel_runtime.errors import InvalidJobStateError, JobNotFoundError
+from keel_runtime.collaboration import Collaboration
+from keel_runtime.errors import CollaborationNotFoundError, InvalidJobStateError, JobNotFoundError
 from keel_runtime.events import JobEvent
 from keel_runtime.jobs import AgentJob, ArtifactInput
 from keel_runtime.object_storage import ObjectStorage
@@ -40,11 +41,27 @@ def _iter_files(root: Path) -> Iterable[Path]:
     return (path for path in sorted(root.rglob("*")) if path.is_file())
 
 
+def _copy_directory_contents(source: Path, target: Path) -> None:
+    if not source.exists():
+        raise FileNotFoundError(f"Workspace source does not exist: {source}")
+    if not source.is_dir():
+        raise NotADirectoryError(f"Workspace source must be a directory: {source}")
+    for item in source.iterdir():
+        item_target = target / item.name
+        if item.is_dir():
+            shutil.copytree(item, item_target, dirs_exist_ok=True)
+        else:
+            item_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, item_target)
+
+
 class JobLayout:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
         self.jobs_root = self.root / "jobs"
+        self.collaborations_root = self.root / "collaborations"
         self.jobs_root.mkdir(parents=True, exist_ok=True)
+        self.collaborations_root.mkdir(parents=True, exist_ok=True)
 
     def job_dir(self, job_id: str) -> Path:
         return self.jobs_root / job_id
@@ -64,10 +81,22 @@ class JobLayout:
     def artifact_dir(self, job_id: str) -> Path:
         return self.job_dir(job_id) / "artifacts"
 
+    def collaboration_dir(self, collaboration_id: str) -> Path:
+        return self.collaborations_root / collaboration_id
+
+    def collaboration_file(self, collaboration_id: str) -> Path:
+        return self.collaboration_dir(collaboration_id) / "collaboration.json"
+
+    def collaboration_workspace_dir(self, collaboration_id: str) -> Path:
+        return self.collaboration_dir(collaboration_id) / "workspace"
+
     def ensure_job_dirs(self, job_id: str) -> None:
         self.session_dir(job_id).mkdir(parents=True, exist_ok=True)
         self.workspace_dir(job_id).mkdir(parents=True, exist_ok=True)
         self.artifact_dir(job_id).mkdir(parents=True, exist_ok=True)
+
+    def ensure_collaboration_dirs(self, collaboration_id: str) -> None:
+        self.collaboration_workspace_dir(collaboration_id).mkdir(parents=True, exist_ok=True)
 
 
 class JobStateStore:
@@ -88,6 +117,26 @@ class JobStateStore:
         for path in sorted(self.layout.jobs_root.glob("*/job.json")):
             jobs.append(AgentJob.from_dict(_read_json(path)))
         return jobs
+
+
+class CollaborationStateStore:
+    def __init__(self, layout: JobLayout) -> None:
+        self.layout = layout
+
+    def save(self, collaboration: Collaboration) -> None:
+        _write_json(self.layout.collaboration_file(collaboration.id), collaboration.to_dict())
+
+    def load(self, collaboration_id: str) -> Collaboration:
+        path = self.layout.collaboration_file(collaboration_id)
+        if not path.exists():
+            raise CollaborationNotFoundError(f"Collaboration not found: {collaboration_id}")
+        return Collaboration.from_dict(_read_json(path))
+
+    def list(self) -> list[Collaboration]:
+        collaborations: list[Collaboration] = []
+        for path in sorted(self.layout.collaborations_root.glob("*/collaboration.json")):
+            collaborations.append(Collaboration.from_dict(_read_json(path)))
+        return collaborations
 
 
 class SessionStore:
@@ -121,19 +170,7 @@ class WorkspaceStore:
         if source is None:
             return workspace_path
 
-        source_path = Path(source)
-        if not source_path.exists():
-            raise FileNotFoundError(f"Workspace source does not exist: {source_path}")
-        if not source_path.is_dir():
-            raise NotADirectoryError(f"Workspace source must be a directory: {source_path}")
-
-        for item in source_path.iterdir():
-            target = workspace_path / item.name
-            if item.is_dir():
-                shutil.copytree(item, target, dirs_exist_ok=True)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, target)
+        _copy_directory_contents(Path(source), workspace_path)
         return workspace_path
 
     def path(self, job_id: str) -> Path:
@@ -187,12 +224,27 @@ class LocalStores:
     def __init__(self, root: str | Path) -> None:
         self.layout = JobLayout(root)
         self.jobs = JobStateStore(self.layout)
+        self.collaborations = CollaborationStateStore(self.layout)
         self.sessions = SessionStore(self.layout)
         self.workspaces = WorkspaceStore(self.layout)
         self.artifacts = ArtifactStore(self.layout)
 
     def ensure_job(self, job_id: str) -> None:
         self.layout.ensure_job_dirs(job_id)
+
+    def ensure_collaboration(self, collaboration_id: str) -> None:
+        self.layout.ensure_collaboration_dirs(collaboration_id)
+
+    def create_collaboration_workspace(
+        self,
+        collaboration_id: str,
+        source: str | Path | None = None,
+    ) -> Path:
+        self.ensure_collaboration(collaboration_id)
+        workspace_path = self.layout.collaboration_workspace_dir(collaboration_id)
+        if source is not None:
+            _copy_directory_contents(Path(source), workspace_path)
+        return workspace_path
 
     def unfinished_jobs(self) -> Iterable[AgentJob]:
         return (job for job in self.jobs.list() if not job.status.is_terminal)

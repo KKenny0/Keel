@@ -1,6 +1,12 @@
 """Keel runtime public API."""
 
 from keel_runtime.cleanup import CleanupPolicy
+from keel_runtime.collaboration import (
+    Collaboration,
+    CollaborationStatus,
+    CollaborationStep,
+    CollaborationStepStatus,
+)
 from keel_runtime.events import EventType, JobEvent
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.manager import JobManager
@@ -17,6 +23,10 @@ __all__ = [
     "ArtifactStore",
     "ArtifactInput",
     "CleanupPolicy",
+    "Collaboration",
+    "CollaborationStatus",
+    "CollaborationStep",
+    "CollaborationStepStatus",
     "DockerRuntime",
     "EventType",
     "JobEvent",

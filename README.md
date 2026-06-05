@@ -43,7 +43,15 @@ Phase 4.1 已完成：模型 API 配置层。
 - 支持任务级模型用量记录。
 - 支持模型 API key 引用，不保存真实密钥。
 
-当前暂不包含多 Agent、复杂工作流引擎、RAG 平台或可视化管理台。
+Phase 5 已完成：多 Agent 协作。
+
+- 支持创建一次协作目标，并让多个 Agent 围绕同一个项目工作区快照执行步骤。
+- 支持串行依赖、并行步骤、人工确认后继续。
+- 支持协作上下文和前置产物传递。
+- 支持失败步骤重试，并保留每次尝试的记录。
+- 支持服务重启后恢复到中间步骤继续。
+
+当前暂不包含复杂工作流引擎、RAG 平台或可视化管理台。
 
 ## 目录结构
 
@@ -58,6 +66,7 @@ keel/
       __init__.py
       specs.py
       jobs.py
+      collaboration.py
       runtime.py
       security.py
       cleanup.py
@@ -114,6 +123,7 @@ uvicorn examples.fastapi_app.app:app --reload
 - 查看和导出完整运行记录。
 - 创建带依赖关系的任务。
 - 查询任务摘要，包括状态、日志、产物、失败原因和依赖状态。
+- 创建多 Agent 协作、添加步骤、人工确认、重试和恢复步骤。
 
 如果需要让示例服务同步到 S3/MinIO，可以设置这些环境变量：
 
@@ -229,12 +239,56 @@ Agent 可以用约定格式上报用量：
 KEEL_MODEL_USAGE_JSON:{"provider":"openai","model":"gpt-4.1","input_tokens":100,"output_tokens":50,"total_tokens":150,"cost_usd":0.01}
 ```
 
+## 多 Agent 协作
+
+```python
+from keel_runtime import AgentSpec, ArtifactInput, JobManager
+
+manager = JobManager(root=".keel")
+collaboration_id = manager.create_collaboration(
+    goal="Review and update this repository",
+    workspace=".",
+    context={"branch": "main"},
+)
+
+analysis_step = manager.add_collaboration_step(
+    collaboration_id,
+    AgentSpec(name="analyst"),
+    {"task": "analyze repo"},
+)
+analysis_job = manager.get_collaboration_step(collaboration_id, analysis_step).job_id
+
+edit_step = manager.add_collaboration_step(
+    collaboration_id,
+    AgentSpec(name="editor"),
+    {"task": "apply changes"},
+    dependencies=[analysis_job],
+    artifact_inputs=[
+        ArtifactInput(
+            source_job_id=analysis_job,
+            source_path="result.txt",
+            target_path="inputs/analysis.txt",
+        )
+    ],
+)
+
+confirm_step = manager.add_collaboration_step(
+    collaboration_id,
+    AgentSpec(name="reporter"),
+    {"task": "write final report"},
+    requires_confirmation=True,
+)
+manager.confirm_collaboration_step(collaboration_id, confirm_step, note="approved")
+```
+
+通过协作入口创建的任务会收到一个输入包，里面包含原始 `input` 和 `collaboration` 上下文。
+
 ## 当前限制
 
-- Phase 4.1 已落地模型 API 配置层。
-- 第一版只面向本地单 Agent 任务。
+- Phase 5 已落地多 Agent 协作入口。
+- 多 Agent 协作保持轻量，只覆盖 Agent 运行、确认、重试、恢复和记录。
 - 底层 Agent 能力复用 pi，不重写 Agent 内核。
 - 默认运行命令是 `pi rpc run`，本地没有 pi 时可以传入自定义命令做测试或适配。
 - 默认持久化目标是本地文件系统。
 - LangGraph、OpenAI Agents SDK、CrewAI、AutoGen 不作为核心依赖。
-- 复杂工作流引擎和多 Agent 协作属于后续阶段。
+- 复杂工作流引擎、RAG 平台和可视化管理台仍不在当前范围内。
