@@ -36,6 +36,13 @@ Phase 4 已完成：任务接口和轻量编排入口。
 - 支持把前置任务产物复制到当前任务工作区。
 - 支持统一查询任务状态、日志、产物、失败原因和依赖状态。
 
+Phase 4.1 已完成：模型 API 配置层。
+
+- 支持结构化模型配置和声明式 fallback。
+- 旧 `model` 字典保持原样透传。
+- 支持任务级模型用量记录。
+- 支持模型 API key 引用，不保存真实密钥。
+
 当前暂不包含多 Agent、复杂工作流引擎、RAG 平台或可视化管理台。
 
 ## 目录结构
@@ -191,9 +198,40 @@ second_id = manager.create_task(
 )
 ```
 
+## 模型 API 配置
+
+```python
+from keel_runtime import AgentSpec, JobManager, ModelConfig
+
+manager = JobManager(root=".keel")
+job_id = manager.create_job(
+    spec=AgentSpec(
+        name="writer",
+        model=ModelConfig(
+            provider="openai",
+            model="gpt-4.1",
+            api_key_ref="OPENAI_API_KEY",
+            fallback=ModelConfig(
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                api_key_ref="ANTHROPIC_API_KEY",
+            ),
+        ),
+        secret_env={"OPENAI_API_KEY": "sk-..."},
+    ),
+    input={"task": "write summary"},
+)
+```
+
+Agent 可以用约定格式上报用量：
+
+```text
+KEEL_MODEL_USAGE_JSON:{"provider":"openai","model":"gpt-4.1","input_tokens":100,"output_tokens":50,"total_tokens":150,"cost_usd":0.01}
+```
+
 ## 当前限制
 
-- Phase 4 已落地任务接口和轻量编排入口。
+- Phase 4.1 已落地模型 API 配置层。
 - 第一版只面向本地单 Agent 任务。
 - 底层 Agent 能力复用 pi，不重写 Agent 内核。
 - 默认运行命令是 `pi rpc run`，本地没有 pi 时可以传入自定义命令做测试或适配。

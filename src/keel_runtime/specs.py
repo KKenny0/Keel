@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from keel_runtime.models import ModelConfig
 from keel_runtime.security import collect_secret_values, sanitize_env, sanitize_secret_env
 
 
@@ -60,7 +61,7 @@ class AgentSpec:
     system_prompt: str = ""
     skills: list[str] = field(default_factory=list)
     tools: dict[str, Any] = field(default_factory=dict)
-    model: dict[str, Any] = field(default_factory=dict)
+    model: ModelConfig | dict[str, Any] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     secret_env: dict[str, str] = field(default_factory=dict)
     command: list[str] | None = None
@@ -81,7 +82,7 @@ class AgentSpec:
             "system_prompt": self.system_prompt,
             "skills": list(self.skills),
             "tools": self.tools,
-            "model": self.model,
+            "model": self.model.to_dict() if isinstance(self.model, ModelConfig) else self.model,
             "env": sanitize_env(self.env),
             "secret_env": sanitize_secret_env(self.secret_env),
             "command": list(self.command) if self.command is not None else None,
@@ -113,3 +114,28 @@ class AgentSpec:
 
     def secret_values(self) -> list[str]:
         return collect_secret_values(self.env, self.secret_env)
+
+    def model_api_key_refs(self) -> list[str]:
+        if isinstance(self.model, ModelConfig):
+            return self.model.api_key_refs()
+        return self._model_api_key_refs_from_dict(self.model)
+
+    def is_structured_model_config(self) -> bool:
+        return isinstance(self.model, ModelConfig)
+
+    @classmethod
+    def _model_api_key_refs_from_dict(cls, data: dict[str, Any]) -> list[str]:
+        refs: list[str] = []
+        current: dict[str, Any] | None = data
+        seen: set[int] = set()
+        while isinstance(current, dict):
+            identity = id(current)
+            if identity in seen:
+                break
+            seen.add(identity)
+            api_key_ref = current.get("api_key_ref")
+            if isinstance(api_key_ref, str) and api_key_ref and api_key_ref not in refs:
+                refs.append(api_key_ref)
+            fallback = current.get("fallback")
+            current = fallback if isinstance(fallback, dict) else None
+        return refs

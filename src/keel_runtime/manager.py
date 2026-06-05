@@ -12,6 +12,7 @@ from keel_runtime.cleanup import CleanupPolicy
 from keel_runtime.errors import DependencyError, RuntimeExecutionError, StorageSyncError
 from keel_runtime.events import EventType, JobEvent, utc_now
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
+from keel_runtime.models import ModelConfig, ProviderRegistry, parse_model_usage
 from keel_runtime.object_storage import ObjectStorage
 from keel_runtime.runtime import AgentRuntime, PiRpcRuntime, resolve_store_path
 from keel_runtime.security import redact_data, redact_text
@@ -26,12 +27,14 @@ class JobManager:
         runtime: AgentRuntime | None = None,
         object_storage: ObjectStorage | None = None,
         cleanup_policy: CleanupPolicy | None = None,
+        provider_registry: ProviderRegistry | None = None,
     ) -> None:
         self.root = resolve_store_path(root)
         self.stores = LocalStores(self.root)
         self.runtime = runtime or PiRpcRuntime()
         self.object_storage = object_storage
         self.cleanup_policy = cleanup_policy or CleanupPolicy()
+        self.provider_registry = provider_registry or ProviderRegistry()
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._queues: dict[str, asyncio.Queue[JobEvent | None]] = {}
         self._stop_requested: set[str] = set()
@@ -73,6 +76,7 @@ class JobManager:
         )
         self.stores.jobs.save(job)
         self._append_event(JobEvent.status(job_id, "job created", status=JobStatus.CREATED.value))
+        self._record_model_config_warnings(job_id, spec)
         return job_id
 
     def create_task(
@@ -266,6 +270,7 @@ class JobManager:
             )
             job = self.stores.jobs.load(job_id)
             job.with_status(final_status, result=result, exit_code=None, timed_out=False)
+            await self._record_model_usage(job, output, scan_output=True)
             self.stores.jobs.save(job)
             await self._record_and_publish(
                 JobEvent.status(job_id, f"job {final_status.value}", status=final_status.value)
@@ -282,6 +287,7 @@ class JobManager:
             await self._apply_cleanup_policy(job_id, final_status)
         except Exception as exc:
             job = self.stores.jobs.load(job_id)
+            await self._record_model_usage(job, [], scan_output=False)
             error = self._redact_text(job_id, str(exc))
             exit_code = exc.exit_code if isinstance(exc, RuntimeExecutionError) else None
             timed_out = exc.timed_out if isinstance(exc, RuntimeExecutionError) else False
@@ -370,6 +376,45 @@ class JobManager:
 
     def _redact_text(self, job_id: str, text: str) -> str:
         return redact_text(text, self._secret_values.get(job_id, []))
+
+    def _record_model_config_warnings(self, job_id: str, spec: AgentSpec) -> None:
+        if not isinstance(spec.model, ModelConfig):
+            return
+        warnings = self.provider_registry.validate(spec.model, secret_env=spec.secret_env)
+        if warnings:
+            self._append_event(
+                JobEvent.status(job_id, "model config warnings", warnings=warnings)
+            )
+
+    async def _record_model_usage(
+        self,
+        job: AgentJob,
+        output: list[str],
+        *,
+        scan_output: bool,
+    ) -> None:
+        usage, warnings = parse_model_usage(
+            output,
+            artifact_dir=job.artifact_path,
+            scan_output=scan_output,
+        )
+        for warning in warnings:
+            await self._record_and_publish(
+                JobEvent.status(job.id, "model usage warning", warning=warning)
+            )
+        if usage is None:
+            return
+        job.model_usage = usage
+        await self._record_and_publish(
+            JobEvent.status(
+                job.id,
+                "model usage recorded",
+                provider=usage.provider,
+                model=usage.model,
+                total_tokens=usage.total_tokens,
+                cost_usd=usage.cost_usd,
+            )
+        )
 
     def _normalize_artifact_inputs(
         self,

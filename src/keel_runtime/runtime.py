@@ -352,6 +352,9 @@ class DockerRuntime:
                 args.extend(["--env", f"{key}={value}"])
         for key in spec.secret_env:
             args.extend(["--env", str(key)])
+        for key in spec.model_api_key_refs():
+            if key not in spec.env and key not in spec.secret_env:
+                args.extend(["--env", str(key)])
         return args
 
     @staticmethod
@@ -570,6 +573,9 @@ class KubernetesPodRuntime:
                 entries.append({"name": str(key), "value": str(value)})
         for key in spec.secret_env:
             entries.append(self._secret_env_entry(key))
+        for key in spec.model_api_key_refs():
+            if key not in spec.env and key not in spec.secret_env:
+                entries.append(self._secret_env_entry(key))
         return entries
 
     def _secret_env_entry(self, key: str) -> dict[str, Any]:

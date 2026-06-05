@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Any
 
 from keel_runtime.events import utc_now
+from keel_runtime.models import ModelUsage
 from keel_runtime.specs import AgentSpec
 
 _NOT_SET = object()
@@ -77,6 +78,7 @@ class AgentJob:
     timed_out: bool = False
     dependencies: list[str] | None = None
     artifact_inputs: list[ArtifactInput] | None = None
+    model_usage: ModelUsage | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +99,7 @@ class AgentJob:
             "artifact_inputs": [
                 artifact_input.to_dict() for artifact_input in (self.artifact_inputs or [])
             ],
+            "model_usage": self.model_usage.to_dict() if self.model_usage else None,
         }
 
     @classmethod
@@ -119,6 +122,11 @@ class AgentJob:
             artifact_inputs=[
                 ArtifactInput.from_dict(item) for item in data.get("artifact_inputs") or []
             ],
+            model_usage=(
+                ModelUsage.from_dict(data["model_usage"])
+                if data.get("model_usage") is not None
+                else None
+            ),
         )
 
     def with_status(
