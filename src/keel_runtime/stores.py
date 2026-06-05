@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import zipfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 from keel_runtime.errors import JobNotFoundError
 from keel_runtime.events import JobEvent
 from keel_runtime.jobs import AgentJob
+from keel_runtime.object_storage import ObjectStorage
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -22,6 +24,20 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _safe_child(root: Path, relative_path: str) -> Path:
+    resolved_root = root.resolve()
+    path = (resolved_root / relative_path).resolve()
+    if resolved_root != path and resolved_root not in path.parents:
+        raise ValueError(f"Path escapes root: {relative_path}")
+    return path
+
+
+def _iter_files(root: Path) -> Iterable[Path]:
+    if not root.exists():
+        return []
+    return (path for path in sorted(root.rglob("*")) if path.is_file())
 
 
 class JobLayout:
@@ -123,6 +139,13 @@ class WorkspaceStore:
     def path(self, job_id: str) -> Path:
         return self.layout.workspace_dir(job_id)
 
+    def list(self, job_id: str) -> list[str]:
+        workspace_dir = self.layout.workspace_dir(job_id)
+        return [
+            str(path.relative_to(workspace_dir)).replace("\\", "/")
+            for path in _iter_files(workspace_dir)
+        ]
+
 
 class ArtifactStore:
     def __init__(self, layout: JobLayout) -> None:
@@ -151,11 +174,7 @@ class ArtifactStore:
         return path.read_bytes()
 
     def _safe_artifact_path(self, job_id: str, relative_path: str) -> Path:
-        artifact_dir = self.layout.artifact_dir(job_id).resolve()
-        path = (artifact_dir / relative_path).resolve()
-        if artifact_dir != path and artifact_dir not in path.parents:
-            raise ValueError(f"Artifact path escapes artifact directory: {relative_path}")
-        return path
+        return _safe_child(self.layout.artifact_dir(job_id), relative_path)
 
 
 class LocalStores:
@@ -171,3 +190,129 @@ class LocalStores:
 
     def unfinished_jobs(self) -> Iterable[AgentJob]:
         return (job for job in self.jobs.list() if not job.status.is_terminal)
+
+    def build_record(self, job_id: str) -> dict[str, Any]:
+        job = self.jobs.load(job_id)
+        workspace_files = self._file_records(self.layout.workspace_dir(job_id))
+        artifact_files = self._file_records(self.layout.artifact_dir(job_id))
+        return {
+            "job": job.to_dict(),
+            "session": [event.to_dict() for event in self.sessions.read(job_id)],
+            "workspace": workspace_files,
+            "artifacts": artifact_files,
+        }
+
+    def export_job(self, job_id: str) -> Path:
+        self.jobs.load(job_id)
+        export_dir = self.layout.job_dir(job_id) / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_path = export_dir / "job-record.zip"
+        record = self.build_record(job_id)
+        self.artifacts.write_text(
+            job_id,
+            "job-record.json",
+            json.dumps(record, ensure_ascii=False, indent=2),
+        )
+        with zipfile.ZipFile(export_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("record.json", json.dumps(record, ensure_ascii=False, indent=2))
+            archive.write(self.layout.job_file(job_id), "job/job.json")
+            session_file = self.layout.session_file(job_id)
+            if session_file.exists():
+                archive.write(session_file, "session/events.jsonl")
+            self._write_tree(archive, self.layout.workspace_dir(job_id), "workspace")
+            self._write_tree(archive, self.layout.artifact_dir(job_id), "artifacts")
+        return export_path
+
+    def sync_to_object_storage(self, job_id: str, storage: ObjectStorage) -> list[str]:
+        job = self.jobs.load(job_id)
+        prefix = f"jobs/{job_id}"
+        record = self.build_record(job_id)
+        uploads: list[tuple[str, bytes, str | None]] = [
+            (
+                f"{prefix}/record.json",
+                json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8"),
+                "application/json",
+            ),
+            (
+                f"{prefix}/job/job.json",
+                json.dumps(job.to_dict(), ensure_ascii=False, indent=2).encode("utf-8"),
+                "application/json",
+            ),
+        ]
+
+        session_file = self.layout.session_file(job_id)
+        if session_file.exists():
+            uploads.append((f"{prefix}/session/events.jsonl", session_file.read_bytes(), None))
+
+        for path in _iter_files(self.layout.workspace_dir(job_id)):
+            relative_path = str(
+                path.relative_to(self.layout.workspace_dir(job_id))
+            ).replace("\\", "/")
+            uploads.append((f"{prefix}/workspace/{relative_path}", path.read_bytes(), None))
+
+        for path in _iter_files(self.layout.artifact_dir(job_id)):
+            relative_path = str(path.relative_to(self.layout.artifact_dir(job_id))).replace(
+                "\\",
+                "/",
+            )
+            uploads.append((f"{prefix}/artifacts/{relative_path}", path.read_bytes(), None))
+
+        uploaded_keys: list[str] = []
+        for key, data, content_type in uploads:
+            storage.put_bytes(key, data, content_type)
+            uploaded_keys.append(key)
+        return uploaded_keys
+
+    def restore_from_object_storage(self, job_id: str, storage: ObjectStorage) -> AgentJob:
+        prefix = f"jobs/{job_id}/"
+        keys = storage.list_keys(prefix)
+        if not keys:
+            raise JobNotFoundError(f"Job not found in object storage: {job_id}")
+
+        self.ensure_job(job_id)
+        for key in keys:
+            relative_key = key.removeprefix(prefix)
+            data = storage.get_bytes(key)
+            if relative_key == "job/job.json":
+                _safe_child(self.layout.job_dir(job_id), "job.json").write_bytes(data)
+            elif relative_key == "session/events.jsonl":
+                _safe_child(self.layout.session_dir(job_id), "events.jsonl").write_bytes(data)
+            elif relative_key.startswith("workspace/"):
+                path = _safe_child(
+                    self.layout.workspace_dir(job_id),
+                    relative_key.removeprefix("workspace/"),
+                )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            elif relative_key.startswith("artifacts/"):
+                path = _safe_child(
+                    self.layout.artifact_dir(job_id),
+                    relative_key.removeprefix("artifacts/"),
+                )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+
+        job = self.jobs.load(job_id)
+        job.session_path = str(self.layout.session_dir(job_id))
+        job.workspace_path = str(self.layout.workspace_dir(job_id))
+        job.artifact_path = str(self.layout.artifact_dir(job_id))
+        self.jobs.save(job)
+        return job
+
+    @staticmethod
+    def _file_records(root: Path) -> list[dict[str, Any]]:
+        records = []
+        for path in _iter_files(root):
+            records.append(
+                {
+                    "path": str(path.relative_to(root)).replace("\\", "/"),
+                    "size": path.stat().st_size,
+                }
+            )
+        return records
+
+    @staticmethod
+    def _write_tree(archive: zipfile.ZipFile, root: Path, archive_root: str) -> None:
+        for path in _iter_files(root):
+            relative_path = str(path.relative_to(root)).replace("\\", "/")
+            archive.write(path, f"{archive_root}/{relative_path}")

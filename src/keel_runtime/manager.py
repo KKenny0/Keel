@@ -8,18 +8,26 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from keel_runtime.errors import StorageSyncError
 from keel_runtime.events import EventType, JobEvent, utc_now
 from keel_runtime.jobs import AgentJob, JobStatus
+from keel_runtime.object_storage import ObjectStorage
 from keel_runtime.runtime import AgentRuntime, PiRpcRuntime, resolve_store_path
 from keel_runtime.specs import AgentSpec
 from keel_runtime.stores import LocalStores
 
 
 class JobManager:
-    def __init__(self, root: str | Path | None = None, runtime: AgentRuntime | None = None) -> None:
+    def __init__(
+        self,
+        root: str | Path | None = None,
+        runtime: AgentRuntime | None = None,
+        object_storage: ObjectStorage | None = None,
+    ) -> None:
         self.root = resolve_store_path(root)
         self.stores = LocalStores(self.root)
         self.runtime = runtime or PiRpcRuntime()
+        self.object_storage = object_storage
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._queues: dict[str, asyncio.Queue[JobEvent | None]] = {}
         self._stop_requested: set[str] = set()
@@ -129,6 +137,28 @@ class JobManager:
         self.stores.jobs.load(job_id)
         return self.stores.sessions.read(job_id)
 
+    def snapshot_job(self, job_id: str) -> dict[str, Any]:
+        return self.stores.build_record(job_id)
+
+    def export_job(self, job_id: str) -> Path:
+        return self.stores.export_job(job_id)
+
+    def sync_job(self, job_id: str) -> list[str]:
+        if self.object_storage is None:
+            raise StorageSyncError("object storage is not configured")
+        try:
+            return self.stores.sync_to_object_storage(job_id, self.object_storage)
+        except Exception as exc:
+            raise StorageSyncError(f"object storage sync failed: {exc}") from exc
+
+    def restore_job(self, job_id: str) -> AgentJob:
+        if self.object_storage is None:
+            raise StorageSyncError("object storage is not configured")
+        try:
+            return self.stores.restore_from_object_storage(job_id, self.object_storage)
+        except Exception as exc:
+            raise StorageSyncError(f"object storage restore failed: {exc}") from exc
+
     async def _run(self, job_id: str) -> None:
         output: list[str] = []
         job = self.stores.jobs.load(job_id)
@@ -164,6 +194,15 @@ class JobManager:
             await self._record_and_publish(
                 JobEvent.status(job_id, f"job {final_status.value}", status=final_status.value)
             )
+            if self.object_storage is not None:
+                uploaded_keys = self.sync_job(job_id)
+                await self._record_and_publish(
+                    JobEvent.status(
+                        job_id,
+                        "job synced",
+                        object_count=len(uploaded_keys),
+                    )
+                )
         except Exception as exc:
             job = self.stores.jobs.load(job_id)
             job.with_status(JobStatus.FAILED, error=str(exc))

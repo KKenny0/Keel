@@ -15,3 +15,7 @@ class InvalidJobStateError(KeelError):
 
 class RuntimeExecutionError(KeelError):
     """Raised when the underlying agent process fails."""
+
+
+class StorageSyncError(KeelError):
+    """Raised when a job cannot be synced to or restored from object storage."""

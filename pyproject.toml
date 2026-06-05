@@ -16,6 +16,9 @@ fastapi = [
   "starlette<1.0",
   "uvicorn>=0.27",
 ]
+s3 = [
+  "boto3>=1.34",
+]
 dev = [
   "httpx>=0.27",
   "pytest>=8.0",

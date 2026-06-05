@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from keel_runtime import AgentSpec, JobManager, PiRpcRuntime
+from keel_runtime import AgentSpec, JobManager, PiRpcRuntime, S3ObjectStorage
 from keel_runtime.errors import JobNotFoundError
 
 
@@ -18,8 +18,18 @@ def _runtime_from_env() -> PiRpcRuntime:
     return PiRpcRuntime(command=shlex.split(command) if command else None)
 
 
+def _object_storage_from_env():
+    if not os.getenv("KEEL_S3_BUCKET"):
+        return None
+    return S3ObjectStorage.from_env()
+
+
 app = FastAPI(title="Keel Runtime Example")
-manager = JobManager(root=os.getenv("KEEL_DATA_DIR", ".keel"), runtime=_runtime_from_env())
+manager = JobManager(
+    root=os.getenv("KEEL_DATA_DIR", ".keel"),
+    runtime=_runtime_from_env(),
+    object_storage=_object_storage_from_env(),
+)
 
 
 class CreateJobRequest(BaseModel):
@@ -64,6 +74,18 @@ async def stream_job(job_id: str) -> StreamingResponse:
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
+@app.get("/jobs/{job_id}/resume")
+async def resume_job(job_id: str) -> StreamingResponse:
+    async def events():
+        try:
+            async for event in manager.resume(job_id):
+                yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+        except JobNotFoundError as exc:
+            yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
 @app.post("/jobs/{job_id}/stop")
 async def stop_job(job_id: str) -> dict[str, str]:
     try:
@@ -71,6 +93,22 @@ async def stop_job(job_id: str) -> dict[str, str]:
     except JobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": status.value}
+
+
+@app.get("/jobs/{job_id}/record")
+def get_job_record(job_id: str) -> dict[str, Any]:
+    try:
+        return manager.snapshot_job(job_id)
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/jobs/{job_id}/export")
+def export_job(job_id: str) -> dict[str, str]:
+    try:
+        return {"path": str(manager.export_job(job_id))}
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/jobs/{job_id}/artifacts")
