@@ -2,7 +2,7 @@
 
 from keel_runtime.cleanup import CleanupPolicy
 from keel_runtime.events import EventType, JobEvent
-from keel_runtime.jobs import AgentJob, JobStatus
+from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.manager import JobManager
 from keel_runtime.object_storage import InMemoryObjectStorage, ObjectStorage, S3ObjectStorage
 from keel_runtime.runtime import AgentRuntime, DockerRuntime, KubernetesPodRuntime, PiRpcRuntime
@@ -14,6 +14,7 @@ __all__ = [
     "AgentRuntime",
     "AgentSpec",
     "ArtifactStore",
+    "ArtifactInput",
     "CleanupPolicy",
     "DockerRuntime",
     "EventType",

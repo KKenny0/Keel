@@ -28,6 +28,39 @@ class JobStatus(StrEnum):
 
 
 @dataclass(slots=True)
+class ArtifactInput:
+    source_job_id: str
+    source_path: str
+    target_path: str | None = None
+    optional: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.source_job_id.strip():
+            raise ValueError("ArtifactInput.source_job_id cannot be empty")
+        if not self.source_path.strip():
+            raise ValueError("ArtifactInput.source_path cannot be empty")
+        if self.target_path is not None and not self.target_path.strip():
+            raise ValueError("ArtifactInput.target_path cannot be empty")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_job_id": self.source_job_id,
+            "source_path": self.source_path,
+            "target_path": self.target_path,
+            "optional": self.optional,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ArtifactInput:
+        return cls(
+            source_job_id=str(data["source_job_id"]),
+            source_path=str(data["source_path"]),
+            target_path=str(data["target_path"]) if data.get("target_path") is not None else None,
+            optional=bool(data.get("optional", False)),
+        )
+
+
+@dataclass(slots=True)
 class AgentJob:
     id: str
     spec: AgentSpec
@@ -42,6 +75,8 @@ class AgentJob:
     error: str | None = None
     exit_code: int | None = None
     timed_out: bool = False
+    dependencies: list[str] | None = None
+    artifact_inputs: list[ArtifactInput] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +93,10 @@ class AgentJob:
             "error": self.error,
             "exit_code": self.exit_code,
             "timed_out": self.timed_out,
+            "dependencies": list(self.dependencies or []),
+            "artifact_inputs": [
+                artifact_input.to_dict() for artifact_input in (self.artifact_inputs or [])
+            ],
         }
 
     @classmethod
@@ -76,6 +115,10 @@ class AgentJob:
             error=data.get("error"),
             exit_code=data.get("exit_code"),
             timed_out=bool(data.get("timed_out", False)),
+            dependencies=[str(job_id) for job_id in data.get("dependencies") or []],
+            artifact_inputs=[
+                ArtifactInput.from_dict(item) for item in data.get("artifact_inputs") or []
+            ],
         )
 
     def with_status(

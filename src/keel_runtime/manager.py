@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from keel_runtime.cleanup import CleanupPolicy
-from keel_runtime.errors import RuntimeExecutionError, StorageSyncError
+from keel_runtime.errors import DependencyError, RuntimeExecutionError, StorageSyncError
 from keel_runtime.events import EventType, JobEvent, utc_now
-from keel_runtime.jobs import AgentJob, JobStatus
+from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.object_storage import ObjectStorage
 from keel_runtime.runtime import AgentRuntime, PiRpcRuntime, resolve_store_path
 from keel_runtime.security import redact_data, redact_text
@@ -44,8 +44,15 @@ class JobManager:
         spec: AgentSpec,
         input: Any,
         workspace: str | Path | None = None,
+        dependencies: list[str] | None = None,
+        artifact_inputs: list[ArtifactInput | dict[str, Any]] | None = None,
     ) -> str:
         job_id = uuid.uuid4().hex
+        normalized_artifact_inputs = self._normalize_artifact_inputs(artifact_inputs)
+        normalized_dependencies = self._normalize_dependencies(
+            dependencies,
+            normalized_artifact_inputs,
+        )
         self._runtime_specs[job_id] = spec
         self._secret_values[job_id] = spec.secret_values()
         self.stores.ensure_job(job_id)
@@ -61,10 +68,28 @@ class JobManager:
             artifact_path=str(self.stores.layout.artifact_dir(job_id)),
             created_at=now,
             updated_at=now,
+            dependencies=normalized_dependencies,
+            artifact_inputs=normalized_artifact_inputs,
         )
         self.stores.jobs.save(job)
         self._append_event(JobEvent.status(job_id, "job created", status=JobStatus.CREATED.value))
         return job_id
+
+    def create_task(
+        self,
+        spec: AgentSpec,
+        input: Any,
+        workspace: str | Path | None = None,
+        dependencies: list[str] | None = None,
+        artifact_inputs: list[ArtifactInput | dict[str, Any]] | None = None,
+    ) -> str:
+        return self.create_job(
+            spec,
+            input,
+            workspace,
+            dependencies=dependencies,
+            artifact_inputs=artifact_inputs,
+        )
 
     async def stream(self, job_id: str) -> AsyncIterator[JobEvent]:
         job = self.stores.jobs.load(job_id)
@@ -135,6 +160,30 @@ class JobManager:
     def list_jobs(self) -> list[AgentJob]:
         return self.stores.jobs.list()
 
+    def describe_job(self, job_id: str) -> dict[str, Any]:
+        job = self.stores.jobs.load(job_id)
+        dependency_jobs = [
+            self.stores.jobs.load(dependency_id)
+            for dependency_id in job.dependencies or []
+        ]
+        return {
+            "job": job.to_dict(),
+            "status": job.status.value,
+            "error": job.error,
+            "exit_code": job.exit_code,
+            "timed_out": job.timed_out,
+            "dependencies": [
+                {
+                    "id": dependency.id,
+                    "status": dependency.status.value,
+                    "error": dependency.error,
+                }
+                for dependency in dependency_jobs
+            ],
+            "logs": [event.to_dict() for event in self.stores.sessions.read(job_id)],
+            "artifacts": self.stores.artifacts.list(job_id),
+        }
+
     def list_artifacts(self, job_id: str) -> list[str]:
         self.stores.jobs.load(job_id)
         return self.stores.artifacts.list(job_id)
@@ -186,13 +235,15 @@ class JobManager:
         output: list[str] = []
         job = self.stores.jobs.load(job_id)
         spec = self._runtime_specs.get(job_id, job.spec)
-        job.with_status(JobStatus.RUNNING)
-        self.stores.jobs.save(job)
-        await self._record_and_publish(
-            JobEvent.status(job_id, "job running", status=job.status.value)
-        )
 
         try:
+            await self._prepare_dependencies(job_id)
+            job = self.stores.jobs.load(job_id)
+            job.with_status(JobStatus.RUNNING)
+            self.stores.jobs.save(job)
+            await self._record_and_publish(
+                JobEvent.status(job_id, "job running", status=job.status.value)
+            )
             async for event in self.runtime.run(job, spec):
                 event = self._sanitize_event(event)
                 if event.type == EventType.OUTPUT:
@@ -319,3 +370,75 @@ class JobManager:
 
     def _redact_text(self, job_id: str, text: str) -> str:
         return redact_text(text, self._secret_values.get(job_id, []))
+
+    def _normalize_artifact_inputs(
+        self,
+        artifact_inputs: list[ArtifactInput | dict[str, Any]] | None,
+    ) -> list[ArtifactInput]:
+        normalized: list[ArtifactInput] = []
+        for artifact_input in artifact_inputs or []:
+            if isinstance(artifact_input, ArtifactInput):
+                normalized.append(artifact_input)
+            else:
+                normalized.append(ArtifactInput.from_dict(artifact_input))
+        return normalized
+
+    def _normalize_dependencies(
+        self,
+        dependencies: list[str] | None,
+        artifact_inputs: list[ArtifactInput],
+    ) -> list[str]:
+        normalized: list[str] = []
+        for dependency_id in [
+            *(dependencies or []),
+            *(artifact_input.source_job_id for artifact_input in artifact_inputs),
+        ]:
+            if dependency_id not in normalized:
+                self.stores.jobs.load(dependency_id)
+                normalized.append(dependency_id)
+        return normalized
+
+    async def _prepare_dependencies(self, job_id: str) -> None:
+        job = self.stores.jobs.load(job_id)
+        if job.dependencies:
+            await self._record_and_publish(
+                JobEvent.status(
+                    job_id,
+                    "job checking dependencies",
+                    dependencies=list(job.dependencies),
+                )
+            )
+        for dependency_id in job.dependencies or []:
+            dependency = self.stores.jobs.load(dependency_id)
+            if dependency.status != JobStatus.SUCCEEDED:
+                raise DependencyError(
+                    f"dependency {dependency_id} is {dependency.status.value}; job will not run"
+                )
+
+        for artifact_input in job.artifact_inputs or []:
+            try:
+                target_path = self.stores.copy_artifact_to_workspace(job_id, artifact_input)
+            except FileNotFoundError:
+                if artifact_input.optional:
+                    await self._record_and_publish(
+                        JobEvent.status(
+                            job_id,
+                            "artifact input skipped",
+                            source_job_id=artifact_input.source_job_id,
+                            source_path=artifact_input.source_path,
+                        )
+                    )
+                    continue
+                raise DependencyError(
+                    "artifact input missing: "
+                    f"{artifact_input.source_job_id}/{artifact_input.source_path}"
+                ) from None
+            await self._record_and_publish(
+                JobEvent.status(
+                    job_id,
+                    "artifact input copied",
+                    source_job_id=artifact_input.source_job_id,
+                    source_path=artifact_input.source_path,
+                    target_path=target_path,
+                )
+            )

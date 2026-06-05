@@ -81,6 +81,8 @@ class CreateJobRequest(BaseModel):
     spec: dict[str, Any] = Field(default_factory=dict)
     input: Any
     workspace: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    artifact_inputs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @app.post("/jobs")
@@ -90,6 +92,8 @@ def create_job(request: CreateJobRequest) -> dict[str, str]:
         AgentSpec.from_dict(spec_data),
         input=request.input,
         workspace=request.workspace,
+        dependencies=request.dependencies,
+        artifact_inputs=request.artifact_inputs,
     )
     return {"job_id": job_id}
 
@@ -103,6 +107,14 @@ def list_jobs() -> list[dict[str, Any]]:
 def get_job(job_id: str) -> dict[str, Any]:
     try:
         return manager.get_job(job_id).to_dict()
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/jobs/{job_id}/summary")
+def describe_job(job_id: str) -> dict[str, Any]:
+    try:
+        return manager.describe_job(job_id)
     except JobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -11,7 +11,7 @@ from typing import Any
 
 from keel_runtime.errors import InvalidJobStateError, JobNotFoundError
 from keel_runtime.events import JobEvent
-from keel_runtime.jobs import AgentJob
+from keel_runtime.jobs import AgentJob, ArtifactInput
 from keel_runtime.object_storage import ObjectStorage
 
 
@@ -145,6 +145,12 @@ class WorkspaceStore:
             str(path.relative_to(workspace_dir)).replace("\\", "/")
             for path in _iter_files(workspace_dir)
         ]
+
+    def write_bytes(self, job_id: str, relative_path: str, content: bytes) -> Path:
+        path = _safe_child(self.layout.workspace_dir(job_id), relative_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return path
 
 
 class ArtifactStore:
@@ -298,6 +304,16 @@ class LocalStores:
         job.artifact_path = str(self.layout.artifact_dir(job_id))
         self.jobs.save(job)
         return job
+
+    def copy_artifact_to_workspace(
+        self,
+        job_id: str,
+        artifact_input: ArtifactInput,
+    ) -> str:
+        target_path = artifact_input.target_path or artifact_input.source_path
+        data = self.artifacts.read_bytes(artifact_input.source_job_id, artifact_input.source_path)
+        self.workspaces.write_bytes(job_id, target_path, data)
+        return target_path.replace("\\", "/")
 
     def cleanup_job(
         self,

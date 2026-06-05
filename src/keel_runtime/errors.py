@@ -13,6 +13,10 @@ class InvalidJobStateError(KeelError):
     """Raised when an operation is not valid for the current job state."""
 
 
+class DependencyError(KeelError):
+    """Raised when a job dependency prevents the job from running."""
+
+
 class RuntimeExecutionError(KeelError):
     """Raised when the underlying agent process fails."""
 

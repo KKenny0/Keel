@@ -29,7 +29,14 @@ Phase 3 已完成：生产运行边界。
 - 支持任务结束后清理工作区或产物。
 - 任务记录、日志和产物会遮盖常见密钥值。
 
-当前暂不包含多 Agent、任务编排、RAG 平台或可视化管理台。
+Phase 4 已完成：任务接口和轻量编排入口。
+
+- 支持一个服务里创建和管理多个任务。
+- 支持任务依赖，前置任务失败时后续任务不会启动。
+- 支持把前置任务产物复制到当前任务工作区。
+- 支持统一查询任务状态、日志、产物、失败原因和依赖状态。
+
+当前暂不包含多 Agent、复杂工作流引擎、RAG 平台或可视化管理台。
 
 ## 目录结构
 
@@ -98,6 +105,8 @@ uvicorn examples.fastapi_app.app:app --reload
 - 查看任务结果和产物。
 - 恢复任务。
 - 查看和导出完整运行记录。
+- 创建带依赖关系的任务。
+- 查询任务摘要，包括状态、日志、产物、失败原因和依赖状态。
 
 如果需要让示例服务同步到 S3/MinIO，可以设置这些环境变量：
 
@@ -156,12 +165,38 @@ async def main():
 asyncio.run(main())
 ```
 
+## 轻量任务依赖
+
+```python
+from keel_runtime import AgentSpec, ArtifactInput, JobManager
+
+manager = JobManager(root=".keel")
+
+first_id = manager.create_task(
+    spec=AgentSpec(name="first"),
+    input={"task": "write-source"},
+)
+
+second_id = manager.create_task(
+    spec=AgentSpec(name="second"),
+    input={"task": "read-source"},
+    dependencies=[first_id],
+    artifact_inputs=[
+        ArtifactInput(
+            source_job_id=first_id,
+            source_path="result.txt",
+            target_path="inputs/source.txt",
+        )
+    ],
+)
+```
+
 ## 当前限制
 
-- Phase 3 已落地生产运行边界。
+- Phase 4 已落地任务接口和轻量编排入口。
 - 第一版只面向本地单 Agent 任务。
 - 底层 Agent 能力复用 pi，不重写 Agent 内核。
 - 默认运行命令是 `pi rpc run`，本地没有 pi 时可以传入自定义命令做测试或适配。
 - 默认持久化目标是本地文件系统。
 - LangGraph、OpenAI Agents SDK、CrewAI、AutoGen 不作为核心依赖。
-- 多任务依赖和多 Agent 协作属于后续阶段。
+- 复杂工作流引擎和多 Agent 协作属于后续阶段。
