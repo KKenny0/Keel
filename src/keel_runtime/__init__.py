@@ -16,6 +16,7 @@ from keel_runtime.context import (
     default_token_counter,
 )
 from keel_runtime.events import EventType, JobEvent
+from keel_runtime.gate import GateDecision, GateDecisionStatus, GateRequest, HumanGate
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.loop import AgentLoop, AgentLoopConfig, AgentLoopResult, ChatClient
 from keel_runtime.manager import JobManager
@@ -56,6 +57,10 @@ __all__ = [
     "ContextResult",
     "DockerRuntime",
     "EventType",
+    "GateDecision",
+    "GateDecisionStatus",
+    "GateRequest",
+    "HumanGate",
     "JobEvent",
     "JobManager",
     "JobStateStore",
