@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from keel_runtime.context import ContextConfig, ContextProvider, ContextResult, Message
 from keel_runtime.events import JobEvent
 from keel_runtime.gate import GateDecision, HumanGate
+from keel_runtime.memory import MemoryProvider, memory_tools
 from keel_runtime.output import parse_output
 from keel_runtime.skills import AgentContext, ComposedPrompt, PromptComposer
 from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult
@@ -39,6 +40,8 @@ class AgentLoopConfig:
     gate_tool_name: str = "human_gate"
     fail_on_gate_rejection: bool = False
     fail_on_gate_timeout: bool = True
+    memory_provider: MemoryProvider | None = None
+    memory_scope: str = "default"
 
     def __post_init__(self) -> None:
         if self.max_iterations <= 0:
@@ -47,6 +50,8 @@ class AgentLoopConfig:
             raise ValueError("AgentLoopConfig.job_id cannot be empty")
         if not self.gate_tool_name.strip():
             raise ValueError("AgentLoopConfig.gate_tool_name cannot be empty")
+        if not self.memory_scope.strip():
+            raise ValueError("AgentLoopConfig.memory_scope cannot be empty")
 
 
 @dataclass(slots=True)
@@ -83,6 +88,13 @@ class AgentLoop:
         self.context_provider = context_provider
         self.config = config or AgentLoopConfig()
         self.tools = tools if isinstance(tools, ToolRegistry) else ToolRegistry(tools)
+        if self.config.memory_provider is not None:
+            for spec in memory_tools(
+                self.config.memory_provider,
+                default_scope=self.config.memory_scope,
+            ):
+                if self.tools.get(spec.name) is None:
+                    self.tools.register(spec)
         if (
             self.config.human_gate is not None
             and self.tools.get(self.config.gate_tool_name) is None

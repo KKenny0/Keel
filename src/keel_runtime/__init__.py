@@ -20,6 +20,7 @@ from keel_runtime.gate import GateDecision, GateDecisionStatus, GateRequest, Hum
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.loop import AgentLoop, AgentLoopConfig, AgentLoopResult, ChatClient
 from keel_runtime.manager import JobManager
+from keel_runtime.memory import Decision, LocalMemoryProvider, MemoryProvider, memory_tools
 from keel_runtime.models import ModelConfig, ModelProvider, ModelUsage, ProviderRegistry
 from keel_runtime.object_storage import InMemoryObjectStorage, ObjectStorage, S3ObjectStorage
 from keel_runtime.output import extract_json, parse_output
@@ -55,6 +56,7 @@ __all__ = [
     "ContextConfig",
     "ContextProvider",
     "ContextResult",
+    "Decision",
     "DockerRuntime",
     "EventType",
     "GateDecision",
@@ -68,6 +70,8 @@ __all__ = [
     "InMemoryObjectStorage",
     "InProcessRuntime",
     "KubernetesPodRuntime",
+    "LocalMemoryProvider",
+    "MemoryProvider",
     "ModelConfig",
     "ModelProvider",
     "ModelUsage",
@@ -90,5 +94,6 @@ __all__ = [
     "ensure_tool_spec",
     "extract_json",
     "parse_output",
+    "memory_tools",
     "tool",
 ]
