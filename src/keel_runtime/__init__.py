@@ -7,6 +7,14 @@ from keel_runtime.collaboration import (
     CollaborationStep,
     CollaborationStepStatus,
 )
+from keel_runtime.context import (
+    ContextConfig,
+    ContextProvider,
+    ContextResult,
+    Message,
+    PrefixStableContext,
+    default_token_counter,
+)
 from keel_runtime.events import EventType, JobEvent
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.manager import JobManager
@@ -33,6 +41,9 @@ __all__ = [
     "CollaborationStatus",
     "CollaborationStep",
     "CollaborationStepStatus",
+    "ContextConfig",
+    "ContextProvider",
+    "ContextResult",
     "DockerRuntime",
     "EventType",
     "JobEvent",
@@ -45,11 +56,14 @@ __all__ = [
     "ModelConfig",
     "ModelProvider",
     "ModelUsage",
+    "Message",
     "ObjectStorage",
     "PiRpcRuntime",
+    "PrefixStableContext",
     "ProviderRegistry",
     "ResourceLimits",
     "S3ObjectStorage",
     "SessionStore",
     "WorkspaceStore",
+    "default_token_counter",
 ]
