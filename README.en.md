@@ -34,66 +34,93 @@ The integration model is not "deploy a Keel service, then register agents." It's
 | `stores` | Local filesystem + S3/MinIO persistence | done |
 | `events` | Streaming event system | done |
 | `collaboration` | Multi-agent collaboration, serial/parallel, human confirmation, retry | done |
-| PromptComposer | Skill injection protocol | planned |
-| Human Gate | Standalone confirmation primitive | planned |
-| MemoryProvider | Memory access protocol | planned |
+| `@agent` / `Agent` | Minimal decorator entry point for client, context, tools, memory, and gates | done |
+| `PromptComposer` | Skill injection protocol | done |
+| `HumanGate` | Standalone confirmation primitive | done |
+| `MemoryProvider` / `LocalMemoryProvider` | Memory access protocol and local JSONL implementation | done |
 
 ## Quick Start
 
-A complete agent loop with a mock client, no real LLM required:
+The 5-minute path: define a tool, wrap a function with `@keel.agent`, then call
+that function directly. This example uses a mock client, so no real LLM is
+required. A runnable version lives at `examples/quickstart_agent.py`.
 
 ```python
 import asyncio
-from keel_runtime import (
-    AgentLoop,
-    AgentLoopConfig,
-    PrefixStableContext,
-    ToolRegistry,
-    Message,
-)
+from typing import Any
+
+import keel_runtime as keel
 
 
-# 1. Define a tool
-from keel_runtime import tool
-
-@tool(name="get_weather", description="Get current weather for a city")
+@keel.tool(name="get_weather", description="Get current weather for a city")
 def get_weather(city: str) -> str:
     return f"{city}: 22C, sunny"
 
 
-# 2. Mock LLM client (replace with your OpenAI / Anthropic / other client)
 class MockClient:
-    async def chat(self, messages, tools):
-        last = messages[-1].content if messages else ""
-        if isinstance(last, dict) and last.get("ok"):
-            return f"Weather report: {last['output']}"
-        from keel_runtime import ToolCall
-        return {
-            "content": None,
-            "tool_calls": [ToolCall(name="get_weather", arguments={"city": "Tokyo"})],
-        }
+    async def chat(self, messages, tools) -> dict[str, Any] | str:
+        tool_names = {message.name for message in messages if message.role == "tool"}
+        if "memory_record" not in tool_names:
+            return {
+                "tool_calls": [
+                    {
+                        "name": "memory_record",
+                        "arguments": {
+                            "title": "Weather quickstart",
+                            "outcome": "Use get_weather for forecast questions",
+                            "tags": ["quickstart"],
+                        },
+                    }
+                ]
+            }
+        if "get_weather" not in tool_names:
+            return {
+                "tool_calls": [
+                    {"name": "get_weather", "arguments": {"city": "Tokyo"}}
+                ]
+            }
+
+        weather = next(
+            message.content["output"]
+            for message in messages
+            if message.role == "tool" and message.name == "get_weather"
+        )
+        return f"Weather report: {weather}"
 
 
-# 3. Assemble and run
+memory = keel.LocalMemoryProvider()
+
+
+@keel.agent(
+    client=MockClient(),
+    tools=[get_weather],
+    memory=memory,
+    memory_scope="quickstart",
+    system_prompt="You are a concise weather assistant.",
+    max_iterations=5,
+)
+async def weather_agent(question: str) -> str:
+    return question
+
+
 async def main():
-    loop = AgentLoop(
-        client=MockClient(),
-        context_provider=PrefixStableContext(max_tokens=64_000),
-        tools=ToolRegistry([get_weather]),
-        config=AgentLoopConfig(
-            system_prompt="You are a helpful weather assistant.",
-            max_iterations=5,
-        ),
-    )
-
-    result = await loop.run("What is the weather in Tokyo?")
+    result = await weather_agent("What is the weather in Tokyo?")
     print(result.status)      # succeeded
     print(result.output)      # Weather report: Tokyo: 22C, sunny
-    print(result.iterations)  # 2
+    print(memory.list_decisions(scope="quickstart")[0].title)
 
 
 asyncio.run(main())
 ```
+
+You can also run the repository example directly:
+
+```bash
+python examples/quickstart_agent.py
+```
+
+Use the lower-level `AgentLoop` API below when you need finer control over
+iterations, history, or job ids.
 
 ## Agent Loop
 
@@ -430,12 +457,12 @@ ruff check .
 | 5.5.2 | ContextProvider | done |
 | 5.5.3 | Tool protocol + structured output | done |
 | 5.5.4 | Agent Loop MVP | done |
-| 5.5.5 | PromptComposer | planned |
-| 5.5.6 | Human Gate | planned |
-| 5.5.7 | MemoryProvider | planned |
-| 5.5.8 | Reference project validation + quickstart | planned |
+| 5.5.5 | PromptComposer | done |
+| 5.5.6 | Human Gate | done |
+| 5.5.7 | MemoryProvider | done |
+| 5.5.8 | Reference project validation + quickstart | in progress: quickstart API done |
 
-Next up: PromptComposer (skill injection protocol), Human Gate (standalone confirmation primitive), MemoryProvider (memory access protocol).
+Next up: validate the reference integrations with script-weaver and open-omnisearch, then confirm the real integration boundary for the minimal API.
 
 ## Design Principles
 

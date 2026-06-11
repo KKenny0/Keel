@@ -34,68 +34,91 @@ pip install keel-runtime
 | `stores` | 本地文件系统 + S3/MinIO 持久化 | done |
 | `events` | 流式事件系统 | done |
 | `collaboration` | 多 Agent 协作,串行/并行,人工确认,重试 | done |
-| PromptComposer | 技能注入协议 | planned |
-| Human Gate | 独立确认原语 | planned |
-| MemoryProvider | 记忆存取协议 | planned |
+| `@agent` / `Agent` | 极简装饰器入口,串起 client、context、tools、memory 和 gate | done |
+| `PromptComposer` | 技能注入协议 | done |
+| `HumanGate` | 独立确认原语 | done |
+| `MemoryProvider` / `LocalMemoryProvider` | 记忆存取协议和本地 JSONL 实现 | done |
 
 ## Quick Start
 
-用 mock client 演示一个完整的 agent loop,不依赖真实 LLM:
+5 分钟路径:定义工具,把函数包成 `@keel.agent`,然后直接调用这个函数。
+下面用 mock client 演示,不依赖真实 LLM。完整可运行版本在 `examples/quickstart_agent.py`。
 
 ```python
 import asyncio
-from keel_runtime import (
-    AgentLoop,
-    AgentLoopConfig,
-    PrefixStableContext,
-    ToolRegistry,
-    Message,
-)
+from typing import Any
+
+import keel_runtime as keel
 
 
-# 1. 定义工具
-from keel_runtime import tool
-
-@tool(name="get_weather", description="Get current weather for a city")
+@keel.tool(name="get_weather", description="Get current weather for a city")
 def get_weather(city: str) -> str:
     return f"{city}: 22C, sunny"
 
 
-# 2. 模拟 LLM client(替换成你的 OpenAI / Anthropic / 其他 client)
 class MockClient:
-    async def chat(self, messages, tools):
-        last = messages[-1].content if messages else ""
-        if isinstance(last, dict) and last.get("ok"):
-            # tool result 已返回,生成最终回答
-            return f"Weather report: {last['output']}"
-        # 第一轮:请求调用工具
-        from keel_runtime import ToolCall
-        return {
-            "content": None,
-            "tool_calls": [ToolCall(name="get_weather", arguments={"city": "Tokyo"})],
-        }
+    async def chat(self, messages, tools) -> dict[str, Any] | str:
+        tool_names = {message.name for message in messages if message.role == "tool"}
+        if "memory_record" not in tool_names:
+            return {
+                "tool_calls": [
+                    {
+                        "name": "memory_record",
+                        "arguments": {
+                            "title": "Weather quickstart",
+                            "outcome": "Use get_weather for forecast questions",
+                            "tags": ["quickstart"],
+                        },
+                    }
+                ]
+            }
+        if "get_weather" not in tool_names:
+            return {
+                "tool_calls": [
+                    {"name": "get_weather", "arguments": {"city": "Tokyo"}}
+                ]
+            }
+
+        weather = next(
+            message.content["output"]
+            for message in messages
+            if message.role == "tool" and message.name == "get_weather"
+        )
+        return f"Weather report: {weather}"
 
 
-# 3. 组装并运行
+memory = keel.LocalMemoryProvider()
+
+
+@keel.agent(
+    client=MockClient(),
+    tools=[get_weather],
+    memory=memory,
+    memory_scope="quickstart",
+    system_prompt="You are a concise weather assistant.",
+    max_iterations=5,
+)
+async def weather_agent(question: str) -> str:
+    return question
+
+
 async def main():
-    loop = AgentLoop(
-        client=MockClient(),
-        context_provider=PrefixStableContext(max_tokens=64_000),
-        tools=ToolRegistry([get_weather]),
-        config=AgentLoopConfig(
-            system_prompt="You are a helpful weather assistant.",
-            max_iterations=5,
-        ),
-    )
-
-    result = await loop.run("What is the weather in Tokyo?")
+    result = await weather_agent("What is the weather in Tokyo?")
     print(result.status)    # succeeded
     print(result.output)    # Weather report: Tokyo: 22C, sunny
-    print(result.iterations)  # 2
+    print(memory.list_decisions(scope="quickstart")[0].title)
 
 
 asyncio.run(main())
 ```
+
+也可以直接运行仓库里的示例:
+
+```bash
+python examples/quickstart_agent.py
+```
+
+当你需要更细控制每轮迭代、历史或 job id 时,使用下面的 `AgentLoop` 底层 API。
 
 ## Agent Loop
 
@@ -432,12 +455,12 @@ ruff check .
 | 5.5.2 | ContextProvider | done |
 | 5.5.3 | Tool 协议 + 结构化输出 | done |
 | 5.5.4 | Agent Loop MVP | done |
-| 5.5.5 | PromptComposer | planned |
-| 5.5.6 | Human Gate | planned |
-| 5.5.7 | MemoryProvider | planned |
-| 5.5.8 | 参考项目验证 + Quickstart | planned |
+| 5.5.5 | PromptComposer | done |
+| 5.5.6 | Human Gate | done |
+| 5.5.7 | MemoryProvider | done |
+| 5.5.8 | 参考项目验证 + Quickstart | in progress: quickstart API done |
 
-下一步:PromptComposer(技能注入协议),Human Gate(独立确认原语),MemoryProvider(记忆存取协议)。
+下一步:用 script-weaver 和 open-omnisearch 做参考项目验证,确认极简 API 的真实接入边界。
 
 ## 设计原则
 

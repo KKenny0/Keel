@@ -1,5 +1,6 @@
 """Keel runtime public API."""
 
+from keel_runtime.agent import Agent, agent
 from keel_runtime.cleanup import CleanupPolicy
 from keel_runtime.collaboration import (
     Collaboration,
@@ -37,6 +38,7 @@ from keel_runtime.stores import ArtifactStore, JobStateStore, SessionStore, Work
 from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult, ToolSpec, ensure_tool_spec, tool
 
 __all__ = [
+    "Agent",
     "AgentJob",
     "AgentRuntime",
     "AgentSpec",
@@ -90,6 +92,7 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "WorkspaceStore",
+    "agent",
     "default_token_counter",
     "ensure_tool_spec",
     "extract_json",
