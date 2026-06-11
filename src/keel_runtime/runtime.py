@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import shlex
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -23,6 +24,9 @@ class AgentRuntime(Protocol):
 
     async def stop(self, job_id: str) -> None:
         """Stop a running job."""
+
+
+InProcessHandler = Callable[[dict[str, Any]], Awaitable[Any] | Any]
 
 
 def _paths_payload(
@@ -65,6 +69,17 @@ def _runtime_env(
         }
     )
     return env
+
+
+def _format_inprocess_result(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    if isinstance(result, bytes):
+        return result.decode("utf-8", errors="replace")
+    try:
+        return json.dumps(result, ensure_ascii=False)
+    except TypeError:
+        return str(result)
 
 
 async def _stop_process(process: asyncio.subprocess.Process) -> None:
@@ -143,6 +158,92 @@ async def _stream_process(
         if not stderr_task.done():
             stderr_task.cancel()
         await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+
+
+class InProcessRuntime:
+    """Run a registered Python callable in the current event loop."""
+
+    def __init__(
+        self,
+        handlers: Mapping[str, InProcessHandler] | None = None,
+        *,
+        default: InProcessHandler | None = None,
+    ) -> None:
+        self._handlers = dict(handlers or {})
+        self._default = default
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
+        self._stopping: set[str] = set()
+
+    def register(self, name: str, handler: InProcessHandler) -> None:
+        if not name.strip():
+            raise ValueError("in-process handler name cannot be empty")
+        self._handlers[name] = handler
+
+    async def run(self, job: AgentJob, spec: AgentSpec) -> AsyncIterator[JobEvent]:
+        handler = self._resolve_handler(spec)
+        payload = _paths_payload(job, spec)
+
+        async def invoke() -> Any:
+            result = handler(payload)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        task = asyncio.create_task(invoke(), name=f"keel-inprocess-{job.id}")
+        self._tasks[job.id] = task
+        yield JobEvent.status(job.id, "in-process callable started", agent_name=spec.name)
+
+        try:
+            try:
+                result = await (
+                    task
+                    if spec.timeout_seconds is None
+                    else asyncio.wait_for(task, timeout=spec.timeout_seconds)
+                )
+            except TimeoutError as exc:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                message = f"in-process callable timed out after {spec.timeout_seconds:g} seconds"
+                raise RuntimeTimeoutError(message) from exc
+            except asyncio.CancelledError:
+                if job.id in self._stopping:
+                    yield JobEvent.status(
+                        job.id,
+                        "in-process callable stopped",
+                        agent_name=spec.name,
+                    )
+                    return
+                raise
+
+            if result is not None:
+                yield JobEvent.output(
+                    job.id,
+                    _format_inprocess_result(result),
+                    stream="inprocess",
+                )
+            yield JobEvent.status(job.id, "in-process callable completed", agent_name=spec.name)
+        finally:
+            self._tasks.pop(job.id, None)
+            self._stopping.discard(job.id)
+
+    async def stop(self, job_id: str) -> None:
+        task = self._tasks.get(job_id)
+        if task is None:
+            return
+        self._stopping.add(job_id)
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except (asyncio.CancelledError, TimeoutError):
+            pass
+
+    def _resolve_handler(self, spec: AgentSpec) -> InProcessHandler:
+        handler = self._handlers.get(spec.name) or self._default
+        if handler is None:
+            raise RuntimeExecutionError(
+                f"in-process handler not registered for agent: {spec.name}"
+            )
+        return handler
 
 
 class PiRpcRuntime:
