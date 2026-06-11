@@ -20,6 +20,7 @@ from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.manager import JobManager
 from keel_runtime.models import ModelConfig, ModelProvider, ModelUsage, ProviderRegistry
 from keel_runtime.object_storage import InMemoryObjectStorage, ObjectStorage, S3ObjectStorage
+from keel_runtime.output import extract_json, parse_output
 from keel_runtime.runtime import (
     AgentRuntime,
     DockerRuntime,
@@ -29,6 +30,7 @@ from keel_runtime.runtime import (
 )
 from keel_runtime.specs import AgentSpec, ResourceLimits
 from keel_runtime.stores import ArtifactStore, JobStateStore, SessionStore, WorkspaceStore
+from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult, ToolSpec, ensure_tool_spec, tool
 
 __all__ = [
     "AgentJob",
@@ -64,6 +66,14 @@ __all__ = [
     "ResourceLimits",
     "S3ObjectStorage",
     "SessionStore",
+    "ToolCall",
+    "ToolRegistry",
+    "ToolResult",
+    "ToolSpec",
     "WorkspaceStore",
     "default_token_counter",
+    "ensure_tool_spec",
+    "extract_json",
+    "parse_output",
+    "tool",
 ]

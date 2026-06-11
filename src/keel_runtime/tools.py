@@ -1,0 +1,310 @@
+"""Tool definition, schema generation, and execution primitives."""
+
+from __future__ import annotations
+
+import inspect
+import json
+from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass, field
+from types import NoneType, UnionType
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+
+ToolHandler = Callable[..., Awaitable[Any] | Any]
+
+
+@dataclass(slots=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    call_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("ToolCall.name cannot be empty")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "arguments": dict(self.arguments),
+            "call_id": self.call_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ToolCall:
+        return cls(
+            name=str(data["name"]),
+            arguments=dict(data.get("arguments") or {}),
+            call_id=str(data["call_id"]) if data.get("call_id") is not None else None,
+        )
+
+
+@dataclass(slots=True)
+class ToolResult:
+    name: str
+    ok: bool
+    output: Any = None
+    error: str | None = None
+    call_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "ok": self.ok,
+            "output": self.output,
+            "error": self.error,
+            "call_id": self.call_id,
+        }
+
+    @classmethod
+    def success(cls, name: str, output: Any, *, call_id: str | None = None) -> ToolResult:
+        return cls(name=name, ok=True, output=output, call_id=call_id)
+
+    @classmethod
+    def failure(cls, name: str, error: str, *, call_id: str | None = None) -> ToolResult:
+        return cls(name=name, ok=False, error=error, call_id=call_id)
+
+
+@dataclass(slots=True)
+class ToolSpec:
+    name: str
+    description: str
+    parameters: dict[str, Any]
+    handler: ToolHandler
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("ToolSpec.name cannot be empty")
+        if not callable(self.handler):
+            raise TypeError("ToolSpec.handler must be callable")
+
+    @classmethod
+    def from_callable(
+        cls,
+        handler: ToolHandler,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> ToolSpec:
+        tool_name = name or handler.__name__
+        tool_description = description if description is not None else inspect.getdoc(handler) or ""
+        return cls(
+            name=tool_name,
+            description=tool_description,
+            parameters=_schema_from_signature(handler),
+            handler=handler,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+        }
+
+    async def execute(self, arguments: dict[str, Any] | None = None) -> ToolResult:
+        arguments = dict(arguments or {})
+        try:
+            bound = _bind_and_validate(self.handler, arguments)
+            result = self.handler(*bound.args, **bound.kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return ToolResult.success(self.name, result)
+        except Exception as exc:
+            return ToolResult.failure(self.name, str(exc))
+
+
+class ToolRegistry:
+    def __init__(self, tools: Iterable[ToolSpec | ToolHandler] | None = None) -> None:
+        self._tools: dict[str, ToolSpec] = {}
+        for item in tools or []:
+            self.register(item)
+
+    def register(self, item: ToolSpec | ToolHandler) -> ToolSpec:
+        spec = ensure_tool_spec(item)
+        self._tools[spec.name] = spec
+        return spec
+
+    def get(self, name: str) -> ToolSpec | None:
+        return self._tools.get(name)
+
+    def list(self) -> list[ToolSpec]:
+        return [self._tools[name] for name in sorted(self._tools)]
+
+    def to_list(self) -> list[dict[str, Any]]:
+        return [spec.to_dict() for spec in self.list()]
+
+    async def execute(
+        self,
+        call: ToolCall | dict[str, Any] | str,
+        arguments: dict[str, Any] | None = None,
+    ) -> ToolResult:
+        tool_call = self._normalize_call(call, arguments)
+        spec = self.get(tool_call.name)
+        if spec is None:
+            return ToolResult.failure(
+                tool_call.name,
+                f"Unknown tool: {tool_call.name}",
+                call_id=tool_call.call_id,
+            )
+        result = await spec.execute(tool_call.arguments)
+        result.call_id = tool_call.call_id
+        return result
+
+    @staticmethod
+    def _normalize_call(
+        call: ToolCall | dict[str, Any] | str,
+        arguments: dict[str, Any] | None,
+    ) -> ToolCall:
+        if isinstance(call, ToolCall):
+            return call
+        if isinstance(call, dict):
+            return ToolCall.from_dict(call)
+        return ToolCall(name=call, arguments=dict(arguments or {}))
+
+
+def tool(
+    name: str | None = None,
+    description: str | None = None,
+) -> Callable[[ToolHandler], ToolHandler]:
+    def decorator(handler: ToolHandler) -> ToolHandler:
+        spec = ToolSpec.from_callable(handler, name=name, description=description)
+        handler.__keel_tool_spec__ = spec  # type: ignore[attr-defined]
+        return handler
+
+    return decorator
+
+
+def ensure_tool_spec(item: ToolSpec | ToolHandler) -> ToolSpec:
+    if isinstance(item, ToolSpec):
+        return item
+    spec = getattr(item, "__keel_tool_spec__", None)
+    if isinstance(spec, ToolSpec):
+        return spec
+    return ToolSpec.from_callable(item)
+
+
+def _schema_from_signature(handler: ToolHandler) -> dict[str, Any]:
+    signature = inspect.signature(handler)
+    type_hints = _resolved_type_hints(handler)
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for name, parameter in signature.parameters.items():
+        if parameter.kind in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }:
+            raise ValueError("Tool functions cannot use *args or **kwargs")
+        schema = _annotation_to_schema(type_hints.get(name, parameter.annotation))
+        if parameter.default is not inspect.Parameter.empty:
+            schema["default"] = _json_safe_default(parameter.default)
+        else:
+            required.append(name)
+        properties[name] = schema
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _bind_and_validate(
+    handler: ToolHandler,
+    arguments: dict[str, Any],
+) -> inspect.BoundArguments:
+    signature = inspect.signature(handler)
+    type_hints = _resolved_type_hints(handler)
+    bound = signature.bind(**arguments)
+    bound.apply_defaults()
+    for name, value in bound.arguments.items():
+        annotation = type_hints.get(name, signature.parameters[name].annotation)
+        if not _matches_annotation(value, annotation):
+            expected = _annotation_name(annotation)
+            actual = type(value).__name__
+            raise TypeError(f"Argument {name!r} expected {expected}, got {actual}")
+    return bound
+
+
+def _resolved_type_hints(handler: ToolHandler) -> dict[str, Any]:
+    try:
+        return get_type_hints(handler)
+    except (AttributeError, NameError, TypeError):
+        return {}
+
+
+def _annotation_to_schema(annotation: Any) -> dict[str, Any]:
+    if annotation is inspect.Parameter.empty or annotation is Any:
+        return {}
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    if origin in {Union, UnionType}:
+        non_none = [arg for arg in args if arg is not NoneType]
+        if len(non_none) == 1 and len(non_none) != len(args):
+            schema = _annotation_to_schema(non_none[0])
+            schema["nullable"] = True
+            return schema
+        return {"anyOf": [_annotation_to_schema(arg) for arg in args]}
+    if origin is Literal:
+        return {"enum": list(args)}
+    if origin in {list, tuple, set}:
+        item_type = args[0] if args else Any
+        return {"type": "array", "items": _annotation_to_schema(item_type)}
+    if origin is dict:
+        return {"type": "object"}
+
+    mapping = {
+        str: "string",
+        int: "integer",
+        float: "number",
+        bool: "boolean",
+        list: "array",
+        tuple: "array",
+        set: "array",
+        dict: "object",
+    }
+    schema_type = mapping.get(annotation)
+    if schema_type is not None:
+        return {"type": schema_type}
+    return {}
+
+
+def _matches_annotation(value: Any, annotation: Any) -> bool:
+    if annotation is inspect.Parameter.empty or annotation is Any:
+        return True
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    if origin in {Union, UnionType}:
+        return any(_matches_annotation(value, arg) for arg in args)
+    if origin is Literal:
+        return value in args
+    if origin in {list, tuple, set}:
+        return isinstance(value, origin)
+    if origin is dict:
+        return isinstance(value, dict)
+    if annotation is NoneType:
+        return value is None
+    if annotation is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if annotation is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if annotation is bool:
+        return isinstance(value, bool)
+    if annotation in {str, list, tuple, set, dict}:
+        return isinstance(value, annotation)
+    return True
+
+
+def _annotation_name(annotation: Any) -> str:
+    if annotation is inspect.Parameter.empty:
+        return "Any"
+    return getattr(annotation, "__name__", str(annotation))
+
+
+def _json_safe_default(value: Any) -> Any:
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return repr(value)
