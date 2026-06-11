@@ -42,10 +42,11 @@ def _extract_json_or_not_found(text: str) -> Any:
         if parsed is not _NOT_FOUND:
             return parsed
 
-    balanced = _extract_balanced_json(text)
-    if balanced is None:
-        return _NOT_FOUND
-    return _loads_or_not_found(balanced)
+    for balanced in _balanced_json_candidates(text):
+        parsed = _loads_or_not_found(balanced)
+        if parsed is not _NOT_FOUND:
+            return parsed
+    return _NOT_FOUND
 
 
 def _validate_model(parsed: Any, model: Any) -> Any:
@@ -65,13 +66,14 @@ def _loads_or_not_found(text: str) -> Any:
         return _NOT_FOUND
 
 
-def _extract_balanced_json(text: str) -> str | None:
+def _balanced_json_candidates(text: str) -> list[str]:
     starts = [index for index, char in enumerate(text) if char in "[{"]
+    candidates: list[str] = []
     for start in starts:
         candidate = _balanced_from(text, start)
         if candidate is not None:
-            return candidate
-    return None
+            candidates.append(candidate)
+    return candidates
 
 
 def _balanced_from(text: str, start: int) -> str | None:

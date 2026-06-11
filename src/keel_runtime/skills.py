@@ -189,6 +189,7 @@ def _parse_yaml_subset(text: str) -> dict[str, Any]:
     data: dict[str, Any] = {}
     current_key: str | None = None
     current_indent = 0
+    current_list_item: dict[str, Any] | None = None
     for raw_line in text.splitlines():
         if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
@@ -199,7 +200,9 @@ def _parse_yaml_subset(text: str) -> dict[str, Any]:
                 raise ValueError("YAML list item has no parent key")
             if not isinstance(data[current_key], list):
                 data[current_key] = []
-            data[current_key].append(_parse_yaml_list_item(line[2:].strip()))
+            item = _parse_yaml_list_item(line[2:].strip())
+            data[current_key].append(item)
+            current_list_item = item if isinstance(item, dict) else None
             continue
         if ":" not in line:
             raise ValueError(f"Unsupported YAML line: {line}")
@@ -207,6 +210,13 @@ def _parse_yaml_subset(text: str) -> dict[str, Any]:
         key, value = line.split(":", 1)
         key = key.strip()
         value = value.strip()
+        if (
+            indent > current_indent
+            and current_key is not None
+            and current_list_item is not None
+        ):
+            current_list_item[key] = _parse_yaml_scalar(value)
+            continue
         if indent > current_indent and current_key is not None:
             if not isinstance(data[current_key], dict):
                 data[current_key] = {}
@@ -214,6 +224,7 @@ def _parse_yaml_subset(text: str) -> dict[str, Any]:
             continue
 
         current_indent = indent
+        current_list_item = None
         if value:
             data[key] = _parse_yaml_scalar(value)
             current_key = None

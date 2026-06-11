@@ -22,6 +22,12 @@ def test_parse_output_reads_embedded_balanced_json() -> None:
     assert parse_output(text) == {"items": [1, 2], "done": True}
 
 
+def test_parse_output_skips_invalid_balanced_json_before_valid_json() -> None:
+    text = 'ignore {not json} then {"ok": true}'
+
+    assert parse_output(text) == {"ok": True}
+
+
 def test_parse_output_returns_raw_text_when_json_is_not_found() -> None:
     assert parse_output("plain text") == "plain text"
 

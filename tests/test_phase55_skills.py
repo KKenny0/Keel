@@ -96,6 +96,23 @@ def test_file_skill_composer_ignores_disabled_skills(tmp_path: Path) -> None:
     assert "skip me" not in composed.content
 
 
+def test_file_skill_composer_keeps_multi_field_yaml_examples(tmp_path: Path) -> None:
+    (tmp_path / "writer.yaml").write_text(
+        """
+name: writer
+examples:
+  - input: question
+    output: answer
+""".strip(),
+        encoding="utf-8",
+    )
+
+    composed = FileSkillComposer(tmp_path).compose("", AgentContext(task="write"))
+
+    assert composed.examples == [{"input": "question", "output": "answer"}]
+    assert '{"input": "question", "output": "answer"}' in composed.content
+
+
 def test_agent_loop_uses_prompt_composer_for_system_prompt(tmp_path: Path) -> None:
     (tmp_path / "skill.json").write_text(
         json.dumps(

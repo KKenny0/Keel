@@ -197,6 +197,25 @@ def test_agent_loop_reports_gate_timeout_as_controlled_stop() -> None:
     assert "gate timeout" in [event.message for event in result.events]
 
 
+def test_late_gate_decision_after_timeout_is_not_reused_for_next_request() -> None:
+    async def scenario() -> tuple[GateDecision, GateDecision]:
+        gate = HumanGate(default_timeout_seconds=0)
+        first = GateRequest.create("first")
+        first_decision = await gate.request(first)
+
+        gate.approve(first.id, feedback="late approval")
+
+        second = GateRequest.create("second")
+        second_decision = await gate.request(second)
+        return first_decision, second_decision
+
+    first_decision, second_decision = run(scenario())
+
+    assert first_decision.timed_out is True
+    assert second_decision.timed_out is True
+    assert second_decision.feedback == "human gate timed out"
+
+
 class NoopRuntime:
     async def run(self, job, spec) -> AsyncIterator[JobEvent]:
         yield JobEvent.output(job.id, "ok")

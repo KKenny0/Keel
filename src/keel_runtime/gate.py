@@ -293,8 +293,6 @@ class HumanGate:
         future = self._pending.get(decision.request_id)
         if future is not None and not future.done():
             future.set_result(decision)
-        else:
-            self._queued_decisions.append(decision)
 
     @staticmethod
     def _decision_event(job_id: str, decision: GateDecision) -> JobEvent:
