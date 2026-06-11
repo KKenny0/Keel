@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keel Logo Prototype</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f0f0f0;
+    color: #333;
+    padding: 48px;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; color: #1a2332; }
+  .subtitle { color: #777; margin-bottom: 40px; font-size: 13px; letter-spacing: 0.3px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 28px;
+    max-width: 780px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 28px;
+    border: 1px solid #e8e8e8;
+  }
+  .card-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 20px;
+  }
+  .card-desc {
+    font-size: 12px;
+    color: #888;
+    margin-top: 16px;
+    line-height: 1.6;
+    border-top: 1px solid #f0f0f0;
+    padding-top: 14px;
+  }
+
+  .mark-large {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 140px;
+    margin-bottom: 20px;
+  }
+  .mark-large svg { width: 90px; height: 90px; }
+
+  .mark-combo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 16px 0;
+    border-top: 1px solid #f0f0f0;
+  }
+  .mark-combo svg { width: 28px; height: 28px; }
+  .wordmark {
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: #1a2332;
+  }
+
+  .sizes {
+    display: flex;
+    align-items: flex-end;
+    gap: 20px;
+    padding-top: 14px;
+    border-top: 1px solid #f0f0f0;
+    margin-top: 0;
+  }
+  .sizes > div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .size-label { font-size: 10px; color: #bbb; }
+  .dark-swatch {
+    background: #1a2332;
+    border-radius: 6px;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .palette {
+    margin-top: 48px;
+    max-width: 780px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 28px;
+    border: 1px solid #e8e8e8;
+  }
+  .palette h3 { font-size: 12px; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 16px; }
+  .swatches { display: flex; gap: 16px; align-items: center; }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .swatch-block {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
+  }
+  .swatch-label { font-size: 11px; color: #888; }
+  .swatch-hex { font-size: 11px; color: #aaa; font-family: monospace; }
+
+  .notes {
+    margin-top: 28px;
+    max-width: 780px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 28px;
+    border: 1px solid #e8e8e8;
+  }
+  .notes h3 { font-size: 12px; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; }
+  .notes ul { padding-left: 18px; }
+  .notes li { font-size: 12px; line-height: 2; color: #666; }
+  .notes li strong { color: #333; }
+</style>
+</head>
+<body>
+
+<h1>Keel Logo Prototype</h1>
+<p class="subtitle">Direction 1: Geometric Keel &mdash; 4 variants, deep navy on white</p>
+
+<div class="grid">
+
+  <!-- A. Bold Keel -->
+  <div class="card">
+    <div class="card-label">A. Bold Keel</div>
+    <div class="mark-large">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="50,86 10,30 28,30 50,64 72,30 90,30" fill="#1a2332"/>
+      </svg>
+    </div>
+    <div class="mark-combo">
+      <svg viewBox="0 0 100 100"><polygon points="50,86 10,30 28,30 50,64 72,30 90,30" fill="#1a2332"/></svg>
+      <span class="wordmark">Keel</span>
+    </div>
+    <div class="sizes">
+      <div>
+        <svg width="56" height="56" viewBox="0 0 100 100"><polygon points="50,86 10,30 28,30 50,64 72,30 90,30" fill="#1a2332"/></svg>
+        <span class="size-label">56</span>
+      </div>
+      <div>
+        <svg width="32" height="32" viewBox="0 0 100 100"><polygon points="50,86 10,30 28,30 50,64 72,30 90,30" fill="#1a2332"/></svg>
+        <span class="size-label">32</span>
+      </div>
+      <div>
+        <svg width="16" height="16" viewBox="0 0 100 100"><polygon points="50,86 10,30 28,30 50,64 72,30 90,30" fill="#1a2332"/></svg>
+        <span class="size-label">16</span>
+      </div>
+      <div>
+        <div class="dark-swatch">
+          <svg width="32" height="32" viewBox="0 0 100 100"><polygon points="50,86 10,30 28,30 50,64 72,30 90,30" fill="#ffffff"/></svg>
+        </div>
+        <span class="size-label">inv</span>
+      </div>
+    </div>
+    <div class="card-desc">Purest form. Thick structural chevron, flat top edges. Confident and simple. Reads at all sizes.</div>
+  </div>
+
+  <!-- B. Keel + Waterline -->
+  <div class="card">
+    <div class="card-label">B. Keel + Waterline</div>
+    <div class="mark-large">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="50,86 16,30 32,30 50,60 68,30 84,30" fill="#1a2332"/>
+        <rect x="8" y="39" width="84" height="2.5" rx="1.25" fill="#0ea5a0"/>
+      </svg>
+    </div>
+    <div class="mark-combo">
+      <svg viewBox="0 0 100 100">
+        <polygon points="50,86 16,30 32,30 50,60 68,30 84,30" fill="#1a2332"/>
+        <rect x="8" y="39" width="84" height="2.5" rx="1.25" fill="#0ea5a0"/>
+      </svg>
+      <span class="wordmark">Keel</span>
+    </div>
+    <div class="sizes">
+      <div>
+        <svg width="56" height="56" viewBox="0 0 100 100">
+          <polygon points="50,86 16,30 32,30 50,60 68,30 84,30" fill="#1a2332"/>
+          <rect x="8" y="39" width="84" height="2.5" rx="1.25" fill="#0ea5a0"/>
+        </svg>
+        <span class="size-label">56</span>
+      </div>
+      <div>
+        <svg width="32" height="32" viewBox="0 0 100 100">
+          <polygon points="50,86 16,30 32,30 50,60 68,30 84,30" fill="#1a2332"/>
+          <rect x="8" y="39" width="84" height="2.5" rx="1.25" fill="#0ea5a0"/>
+        </svg>
+        <span class="size-label">32</span>
+      </div>
+      <div>
+        <svg width="16" height="16" viewBox="0 0 100 100">
+          <polygon points="50,86 16,30 32,30 50,60 68,30 84,30" fill="#1a2332"/>
+          <rect x="8" y="39" width="84" height="2.5" rx="1.25" fill="#0ea5a0"/>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+      <div>
+        <div class="dark-swatch">
+          <svg width="32" height="32" viewBox="0 0 100 100">
+            <polygon points="50,86 16,30 32,30 50,60 68,30 84,30" fill="#ffffff"/>
+            <rect x="8" y="39" width="84" height="2.5" rx="1.25" fill="#0ea5a0"/>
+          </svg>
+        </div>
+        <span class="size-label">inv</span>
+      </div>
+    </div>
+    <div class="card-desc">Adds a teal waterline through the keel. Suggests surface/signal layer. Adds narrative but risks noise at small sizes.</div>
+  </div>
+
+  <!-- C. Split Keel -->
+  <div class="card">
+    <div class="card-label">C. Split Keel</div>
+    <div class="mark-large">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="46,86 10,30 26,30 46,64" fill="#1a2332"/>
+        <polygon points="54,86 90,30 74,30 54,64" fill="#1a2332"/>
+      </svg>
+    </div>
+    <div class="mark-combo">
+      <svg viewBox="0 0 100 100">
+        <polygon points="46,86 10,30 26,30 46,64" fill="#1a2332"/>
+        <polygon points="54,86 90,30 74,30 54,64" fill="#1a2332"/>
+      </svg>
+      <span class="wordmark">Keel</span>
+    </div>
+    <div class="sizes">
+      <div>
+        <svg width="56" height="56" viewBox="0 0 100 100">
+          <polygon points="46,86 10,30 26,30 46,64" fill="#1a2332"/>
+          <polygon points="54,86 90,30 74,30 54,64" fill="#1a2332"/>
+        </svg>
+        <span class="size-label">56</span>
+      </div>
+      <div>
+        <svg width="32" height="32" viewBox="0 0 100 100">
+          <polygon points="46,86 10,30 26,30 46,64" fill="#1a2332"/>
+          <polygon points="54,86 90,30 74,30 54,64" fill="#1a2332"/>
+        </svg>
+        <span class="size-label">32</span>
+      </div>
+      <div>
+        <svg width="16" height="16" viewBox="0 0 100 100">
+          <polygon points="46,86 10,30 26,30 46,64" fill="#1a2332"/>
+          <polygon points="54,86 90,30 74,30 54,64" fill="#1a2332"/>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+      <div>
+        <div class="dark-swatch">
+          <svg width="32" height="32" viewBox="0 0 100 100">
+            <polygon points="46,86 10,30 26,30 46,64" fill="#ffffff"/>
+            <polygon points="54,86 90,30 74,30 54,64" fill="#ffffff"/>
+          </svg>
+        </div>
+        <span class="size-label">inv</span>
+      </div>
+    </div>
+    <div class="card-desc">Two halves with a gap. Suggests isolation and containment, maps directly to Keel's job isolation model. Most distinctive of the four.</div>
+  </div>
+
+  <!-- D. Keel Frame -->
+  <div class="card">
+    <div class="card-label">D. Keel Frame</div>
+    <div class="mark-large">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path d="M50 84 L16 34 L84 34 Z" fill="none" stroke="#1a2332" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="mark-combo">
+      <svg viewBox="0 0 100 100">
+        <path d="M50 84 L16 34 L84 34 Z" fill="none" stroke="#1a2332" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+      <span class="wordmark">Keel</span>
+    </div>
+    <div class="sizes">
+      <div>
+        <svg width="56" height="56" viewBox="0 0 100 100">
+          <path d="M50 84 L16 34 L84 34 Z" fill="none" stroke="#1a2332" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+        <span class="size-label">56</span>
+      </div>
+      <div>
+        <svg width="32" height="32" viewBox="0 0 100 100">
+          <path d="M50 84 L16 34 L84 34 Z" fill="none" stroke="#1a2332" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+        <span class="size-label">32</span>
+      </div>
+      <div>
+        <svg width="16" height="16" viewBox="0 0 100 100">
+          <path d="M50 84 L16 34 L84 34 Z" fill="none" stroke="#1a2332" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>
+        <span class="size-label">16</span>
+      </div>
+      <div>
+        <div class="dark-swatch">
+          <svg width="32" height="32" viewBox="0 0 100 100">
+            <path d="M50 84 L16 34 L84 34 Z" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span class="size-label">inv</span>
+      </div>
+    </div>
+    <div class="card-desc">Outline only. Lighter and more refined. Less impact at 16px but elegant at display sizes.</div>
+  </div>
+
+</div>
+
+<div class="palette">
+  <h3>Color Palette</h3>
+  <div class="swatches">
+    <div class="swatch">
+      <div class="swatch-block" style="background:#1a2332"></div>
+      <span class="swatch-label">Primary</span>
+      <span class="swatch-hex">#1a2332</span>
+    </div>
+    <div class="swatch">
+      <div class="swatch-block" style="background:#0ea5a0"></div>
+      <span class="swatch-label">Accent</span>
+      <span class="swatch-hex">#0ea5a0</span>
+    </div>
+    <div class="swatch">
+      <div class="swatch-block" style="background:#ffffff; border:1px solid #ddd"></div>
+      <span class="swatch-label">Surface</span>
+      <span class="swatch-hex">#ffffff</span>
+    </div>
+    <div class="swatch">
+      <div class="swatch-block" style="background:#2d3748"></div>
+      <span class="swatch-label">Alt dark</span>
+      <span class="swatch-hex">#2d3748</span>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <h3>Assessment</h3>
+  <ul>
+    <li><strong>A</strong> is safe and correct. It reads at all sizes. The risk: it looks like many other chevron logos.</li>
+    <li><strong>B</strong> tells a better story (waterline = signal surface) but the teal line becomes a smudge at 16px.</li>
+    <li><strong>C</strong> is the strongest candidate. The split gap makes it unique and directly maps to Keel's core idea: isolated, contained tasks. The gap creates visual tension that a plain chevron does not have.</li>
+    <li><strong>D</strong> is the weakest at small sizes. The outline collapses into a fuzzy triangle at 16px. Better for display contexts only.</li>
+  </ul>
+</div>
+
+</body>
+</html>

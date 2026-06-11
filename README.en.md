@@ -3,44 +3,44 @@
 </p>
 
 <p align="center">
-  嵌入式 Agent 运行时工具包<br>
-  Job 生命周期、上下文管理、工具协议、结构化输出、持久化恢复,开箱即用。
+  Embeddable Agent Runtime Toolkit<br>
+  Job lifecycle, context management, tool protocol, structured output, persistent recovery, out of the box.
 </p>
 
 ---
 
-## Keel 是什么
+## What is Keel
 
-Keel 是一个 Python 工具包。它嵌入你的项目,帮你快速获得 Agent 系统的通用运行能力:agent loop、context 管理、tool 执行、结构化输出、job 持久化和恢复。你只写领域差异部分(system prompt、output type、业务工具),Keel 提供所有通用机制。
+Keel is a Python toolkit. It embeds into your project and gives your agents production-grade runtime capabilities: agent loop, context management, tool execution, structured output parsing, job persistence and recovery. You write the domain-specific parts (system prompt, output type, business tools). Keel handles the rest.
 
 ```text
 pip install keel-runtime
 ```
 
-接入模式不是"部署 Keel 服务 再注册 agent",而是"加几行代码,你的代码获得生产级能力"。
+The integration model is not "deploy a Keel service, then register agents." It's "add a few lines of code, and your code gains production capabilities."
 
 ## Building Blocks
 
-| 模块 | 职责 | 状态 |
+| Module | Responsibility | Status |
 | --- | --- | --- |
-| `AgentLoop` | LLM 调用,tool 执行,迭代控制,usage 上报 | done |
-| `PrefixStableContext` | token 预算,前缀稳定分区,已消费 tool result 清理,历史裁剪 | done |
-| `ToolRegistry` / `@tool` | 装饰器定义工具,自动生成 schema,注册和执行 | done |
-| `parse_output` / `extract_json` | 从 LLM 文本中提取 JSON,Pydantic 校验,文本 fallback | done |
-| `InProcessRuntime` | 把 Python async callable 包装成 Keel job | done |
-| `JobManager` | 创建、运行、停止、恢复、查询 job 和 collaboration | done |
-| `ModelConfig` | 结构化模型配置,声明式 fallback,provider 校验 | done |
-| `AgentSpec` / `AgentJob` | Agent 定义,job 状态,依赖,资源限制 | done |
-| `stores` | 本地文件系统 + S3/MinIO 持久化 | done |
-| `events` | 流式事件系统 | done |
-| `collaboration` | 多 Agent 协作,串行/并行,人工确认,重试 | done |
-| PromptComposer | 技能注入协议 | planned |
-| Human Gate | 独立确认原语 | planned |
-| MemoryProvider | 记忆存取协议 | planned |
+| `AgentLoop` | LLM calls, tool execution, iteration control, usage reporting | done |
+| `PrefixStableContext` | Token budget, stable prefix partitioning, consumed tool result cleanup, history trimming | done |
+| `ToolRegistry` / `@tool` | Decorator-based tool definition, auto-generated schema, registration and execution | done |
+| `parse_output` / `extract_json` | JSON extraction from LLM text, Pydantic validation, text fallback | done |
+| `InProcessRuntime` | Wrap a Python async callable as a Keel job | done |
+| `JobManager` | Create, run, stop, restore, query jobs and collaborations | done |
+| `ModelConfig` | Structured model config, declarative fallback, provider validation | done |
+| `AgentSpec` / `AgentJob` | Agent definition, job status, dependencies, resource limits | done |
+| `stores` | Local filesystem + S3/MinIO persistence | done |
+| `events` | Streaming event system | done |
+| `collaboration` | Multi-agent collaboration, serial/parallel, human confirmation, retry | done |
+| PromptComposer | Skill injection protocol | planned |
+| Human Gate | Standalone confirmation primitive | planned |
+| MemoryProvider | Memory access protocol | planned |
 
 ## Quick Start
 
-用 mock client 演示一个完整的 agent loop,不依赖真实 LLM:
+A complete agent loop with a mock client, no real LLM required:
 
 ```python
 import asyncio
@@ -53,7 +53,7 @@ from keel_runtime import (
 )
 
 
-# 1. 定义工具
+# 1. Define a tool
 from keel_runtime import tool
 
 @tool(name="get_weather", description="Get current weather for a city")
@@ -61,14 +61,12 @@ def get_weather(city: str) -> str:
     return f"{city}: 22C, sunny"
 
 
-# 2. 模拟 LLM client(替换成你的 OpenAI / Anthropic / 其他 client)
+# 2. Mock LLM client (replace with your OpenAI / Anthropic / other client)
 class MockClient:
     async def chat(self, messages, tools):
         last = messages[-1].content if messages else ""
         if isinstance(last, dict) and last.get("ok"):
-            # tool result 已返回,生成最终回答
             return f"Weather report: {last['output']}"
-        # 第一轮:请求调用工具
         from keel_runtime import ToolCall
         return {
             "content": None,
@@ -76,7 +74,7 @@ class MockClient:
         }
 
 
-# 3. 组装并运行
+# 3. Assemble and run
 async def main():
     loop = AgentLoop(
         client=MockClient(),
@@ -89,8 +87,8 @@ async def main():
     )
 
     result = await loop.run("What is the weather in Tokyo?")
-    print(result.status)    # succeeded
-    print(result.output)    # Weather report: Tokyo: 22C, sunny
+    print(result.status)      # succeeded
+    print(result.output)      # Weather report: Tokyo: 22C, sunny
     print(result.iterations)  # 2
 
 
@@ -99,9 +97,9 @@ asyncio.run(main())
 
 ## Agent Loop
 
-`AgentLoop` 把 LLM 调用、ContextProvider 组装、工具执行、结构化输出解析串成完整循环。
+`AgentLoop` wires together LLM calls, ContextProvider assembly, tool execution, and structured output parsing into a complete cycle.
 
-LLM client 只需要满足最小签名 `async def chat(messages, tools) -> response`:
+Your LLM client only needs to satisfy the minimal signature `async def chat(messages, tools) -> response`:
 
 ```python
 class MyClient:
@@ -114,106 +112,106 @@ class MyClient:
         return response.choices[0].message
 ```
 
-配置项:
+Configuration:
 
 ```python
 config = AgentLoopConfig(
     system_prompt="You are a research assistant.",
     max_iterations=10,
-    parse_final_output=True,       # 自动解析最终输出为 JSON
-    output_model=MyPydanticModel,  # 可选:用 Pydantic 校验
-    fail_on_tool_error=False,      # tool 失败时是否终止 loop
+    parse_final_output=True,       # Auto-parse final output as JSON
+    output_model=MyPydanticModel,  # Optional: validate with Pydantic
+    fail_on_tool_error=False,      # Whether to abort on tool failure
     job_id="my-agent-job",
 )
 ```
 
-`AgentLoopResult` 包含:
+`AgentLoopResult` contains:
 
 - `status`: `succeeded` / `failed` / `max_iterations`
-- `output`: 解析后的输出(如果 `parse_final_output=True`)
-- `raw_output`: LLM 原始文本
-- `iterations`: 实际迭代次数
-- `messages`: 完整消息历史
-- `tool_results`: 所有工具执行结果
-- `events`: 所有 Keel 事件
+- `output`: Parsed output (if `parse_final_output=True`)
+- `raw_output`: Raw LLM text
+- `iterations`: Actual iteration count
+- `messages`: Full message history
+- `tool_results`: All tool execution results
+- `events`: All Keel events
 
-## Context 管理
+## Context Management
 
-`PrefixStableContext` 在每次 LLM 调用前组装 messages,防止无限追加历史:
+`PrefixStableContext` assembles messages before each LLM call, preventing unbounded history growth:
 
 ```python
 from keel_runtime import PrefixStableContext
 
 context = PrefixStableContext(
-    max_tokens=64_000,          # token 预算
-    keep_recent_turns=10,       # 保留最近 N 轮
-    clear_consumed_results=True,  # 先清理已消费 tool result
-    cache_control=True,         # 输出 cache breakpoint 元数据
+    max_tokens=64_000,            # Token budget
+    keep_recent_turns=10,         # Keep last N turns
+    clear_consumed_results=True,  # Clear consumed tool results first
+    cache_control=True,           # Output cache breakpoint metadata
 )
 ```
 
-四分区策略:
+Four-partition strategy:
 
-1. **SYSTEM**: system prompt,永不裁剪
-2. **TASK**: 初始任务意图(第一个 user + 第一个 assistant),永不裁剪
-3. **HISTORY**: 中间历史,token 压力下优先裁剪
-4. **ACTIVE**: 最近活跃轮次,尽量保留
+1. **SYSTEM**: System prompt, never trimmed.
+2. **TASK**: Initial task intent (first user + first assistant), never trimmed.
+3. **HISTORY**: Intermediate history, trimmed first under token pressure.
+4. **ACTIVE**: Recent active turns, preserved as much as possible.
 
-裁剪顺序:先清理已消费 tool result,再从 HISTORY 区头部裁剪。SYSTEM 和 TASK 区始终稳定。
+Trimming order: clear consumed tool results first, then trim from the head of HISTORY. SYSTEM and TASK partitions stay stable.
 
-你可以替换整个 ContextProvider 实现:
+You can replace the entire ContextProvider:
 
 ```python
 from keel_runtime import ContextProvider, ContextResult
 
 class MyContextProvider:
     async def build_messages(self, system_prompt, history, new_messages, config=None):
-        # 你的组装逻辑
+        # Your assembly logic
         return ContextResult(messages=..., tokens_used=..., cache_breakpoints=[])
 ```
 
-## Tool 协议
+## Tool Protocol
 
-用 `@tool` 装饰器定义工具,自动生成参数 schema:
+Define tools with the `@tool` decorator. Parameter schemas are auto-generated:
 
 ```python
 from keel_runtime import tool, ToolRegistry
 
 @tool(name="search_web", description="Search the web for information")
 async def search_web(query: str, max_results: int = 5) -> list[dict]:
-    # 你的搜索逻辑
+    # Your search logic
     return [{"title": "...", "url": "..."}]
 
 @tool(name="read_file", description="Read a file from workspace")
 def read_file(path: str) -> str:
     return open(path).read()
 
-# 注册
+# Register
 registry = ToolRegistry([search_web, read_file])
 
-# 查看生成的 schema
+# View generated schemas
 print(registry.to_list())
 # [{"name": "search_web", "description": "...", "parameters": {...}}, ...]
 
-# 执行
+# Execute
 from keel_runtime import ToolCall
 result = await registry.execute(ToolCall(name="search_web", arguments={"query": "keel agent"}))
 print(result.ok, result.output)
 ```
 
-## 结构化输出
+## Structured Output
 
-从 LLM 文本响应中提取结构化数据:
+Extract structured data from LLM text responses:
 
 ```python
 from keel_runtime import parse_output, extract_json
 
-# 自动提取 JSON(处理 markdown code block)
+# Auto-extract JSON (handles markdown code blocks)
 text = 'Here is the result:\n```json\n{"score": 8.5, "summary": "Good"}\n```'
 data = parse_output(text)
 # {"score": 8.5, "summary": "Good"}
 
-# 用 Pydantic 校验
+# Validate with Pydantic
 from pydantic import BaseModel
 
 class Review(BaseModel):
@@ -223,13 +221,13 @@ class Review(BaseModel):
 review = parse_output(text, model=Review)
 # Review(score=8.5, summary='Good')
 
-# 只提取 JSON,不校验
+# Extract JSON only, no validation
 raw = extract_json(text)
 ```
 
 ## InProcessRuntime
 
-把 Python async callable 包装成 Keel job,不需要起子进程:
+Wrap a Python async callable as a Keel job, no subprocess required:
 
 ```python
 from keel_runtime import JobManager, InProcessRuntime, AgentSpec
@@ -246,7 +244,7 @@ async for event in manager.stream(job_id):
     print(event.message)
 ```
 
-## Job 生命周期
+## Job Lifecycle
 
 ```python
 from keel_runtime import AgentSpec, JobManager
@@ -257,30 +255,30 @@ spec = AgentSpec(
     system_prompt="You write concise summaries.",
 )
 
-# 创建并运行
+# Create and run
 job_id = manager.create_job(spec, input="Summarize this repo.")
 
-# 流式输出
+# Stream output
 async for event in manager.stream(job_id):
     print(event.message)
 
-# 查询状态
+# Query status
 status = manager.get_status(job_id)
 
-# 查看产物
+# List artifacts
 artifacts = manager.list_artifacts(job_id)
 
-# 停止
+# Stop
 manager.stop(job_id)
 
-# 恢复中断的任务
+# Restore an interrupted job
 manager.restore_job(job_id)
 
-# 导出完整记录
+# Export full record
 manager.export_job(job_id)
 ```
 
-## 模型配置
+## Model Configuration
 
 ```python
 from keel_runtime import AgentSpec, ModelConfig
@@ -301,7 +299,7 @@ spec = AgentSpec(
 )
 ```
 
-## 任务依赖
+## Task Dependencies
 
 ```python
 from keel_runtime import AgentSpec, ArtifactInput, JobManager
@@ -327,7 +325,7 @@ second = manager.create_task(
 )
 ```
 
-## 多 Agent 协作
+## Multi-Agent Collaboration
 
 ```python
 from keel_runtime import AgentSpec, ArtifactInput, JobManager
@@ -353,7 +351,7 @@ step2 = manager.add_collaboration_step(
     ],
 )
 
-# 人工确认
+# Human confirmation
 step3 = manager.add_collaboration_step(
     collab_id,
     AgentSpec(name="reviewer"),
@@ -363,7 +361,7 @@ step3 = manager.add_collaboration_step(
 manager.confirm_collaboration_step(collab_id, step3, note="approved")
 ```
 
-## 目录结构
+## Directory Structure
 
 ```text
 keel/
@@ -372,28 +370,28 @@ keel/
     keel_runtime/
       __init__.py
       loop.py            Agent loop
-      context.py         Context 管理
-      tools.py           Tool 协议
-      output.py          结构化输出
-      runtime.py         Runtime 适配器(InProcess / PiRpc / Docker / K8s)
+      context.py         Context management
+      tools.py           Tool protocol
+      output.py          Structured output
+      runtime.py         Runtime adapters (InProcess / PiRpc / Docker / K8s)
       manager.py         JobManager
       specs.py           AgentSpec / ResourceLimits
       jobs.py            AgentJob / JobStatus
       models.py          ModelConfig / ModelUsage
-      collaboration.py   多 Agent 协作
-      stores.py          持久化存储
-      events.py          流式事件
-      security.py        密钥遮盖
-      cleanup.py         清理策略
-      object_storage.py  S3/MinIO 适配器
-      errors.py          异常层级
+      collaboration.py   Multi-agent collaboration
+      stores.py          Persistent storage
+      events.py          Streaming events
+      security.py        Secret masking
+      cleanup.py         Cleanup policies
+      object_storage.py  S3/MinIO adapter
+      errors.py          Exception hierarchy
   examples/
-    fastapi_app/         FastAPI 示例服务
+    fastapi_app/         FastAPI example service
   tests/
-  design/                Logo 和视觉资源
+  design/                Logo and visual assets
 ```
 
-## 安装
+## Installation
 
 Python 3.11+:
 
@@ -403,49 +401,49 @@ source .venv/bin/activate       # Windows: .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev,fastapi]"
 ```
 
-S3/MinIO 持久化:
+S3/MinIO persistence:
 
 ```bash
 pip install -e ".[s3]"
 ```
 
-## 开发和测试
+## Development & Testing
 
 ```bash
 pytest
 ruff check .
 ```
 
-## 状态
+## Status
 
-**Phase 1-5 已完成。** Phase 5.5 进行中。
+**Phase 1-5 complete.** Phase 5.5 in progress.
 
-| Phase | 内容 | 状态 |
+| Phase | Scope | Status |
 | --- | --- | --- |
-| 1 | 本地单 Agent MVP | done |
-| 2 | 持久化和恢复 | done |
-| 3 | 生产运行边界(进程 / Docker / K8s) | done |
-| 4 | 任务接口和轻量编排 | done |
-| 4.1 | 模型 API 配置层 | done |
-| 5 | 多 Agent 协作 | done |
+| 1 | Local single-agent MVP | done |
+| 2 | Persistence and recovery | done |
+| 3 | Production runtime boundaries (process / Docker / K8s) | done |
+| 4 | Task interface and light orchestration | done |
+| 4.1 | Model API configuration layer | done |
+| 5 | Multi-agent collaboration | done |
 | 5.5.1 | InProcessRuntime | done |
 | 5.5.2 | ContextProvider | done |
-| 5.5.3 | Tool 协议 + 结构化输出 | done |
+| 5.5.3 | Tool protocol + structured output | done |
 | 5.5.4 | Agent Loop MVP | done |
 | 5.5.5 | PromptComposer | planned |
 | 5.5.6 | Human Gate | planned |
 | 5.5.7 | MemoryProvider | planned |
-| 5.5.8 | 参考项目验证 + Quickstart | planned |
+| 5.5.8 | Reference project validation + quickstart | planned |
 
-下一步:PromptComposer(技能注入协议),Human Gate(独立确认原语),MemoryProvider(记忆存取协议)。
+Next up: PromptComposer (skill injection protocol), Human Gate (standalone confirmation primitive), MemoryProvider (memory access protocol).
 
-## 设计原则
+## Design Principles
 
-- **工具包,不是外壳。** pip install,加几行代码,你的代码获得能力。
-- **通用机制,不提供领域模式。** agent loop、context、tool protocol 是通用的;agent 怎么定义、pipeline 怎么串,你决定。
-- **Provider 协议,不锁实现。** ContextProvider、LLM client 都可以替换成你的实现。
-- **架构对齐 OpenAI Agents SDK 模式,模型不锁 OpenAI。** LLM 调用层 provider-agnostic,加 adapter 即可接入 Anthropic、Google 等。
-- **零外部依赖。** 核心包不依赖任何第三方库。
+- **Toolkit, not a shell.** pip install, add a few lines, your code gains capabilities.
+- **Generic mechanisms, no domain patterns.** Agent loop, context, tool protocol are generic; how you define agents, wire pipelines, that's your call.
+- **Provider protocol, no locked implementation.** ContextProvider, LLM client are all replaceable.
+- **Aligned with OpenAI Agents SDK patterns, not locked to OpenAI.** The LLM call layer is provider-agnostic. Add an adapter for Anthropic, Google, or any provider.
+- **Zero external dependencies.** The core package has no third-party requirements.
 
 ## License
 
