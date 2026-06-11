@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from keel_runtime.context import ContextConfig, ContextProvider, ContextResult, Message
 from keel_runtime.events import JobEvent
 from keel_runtime.output import parse_output
+from keel_runtime.skills import AgentContext, ComposedPrompt, PromptComposer
 from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult
 
 
@@ -32,6 +33,7 @@ class AgentLoopConfig:
     output_model: Any | None = None
     fail_on_tool_error: bool = False
     job_id: str = "agent-loop"
+    prompt_composer: PromptComposer | None = None
 
     def __post_init__(self) -> None:
         if self.max_iterations <= 0:
@@ -49,6 +51,7 @@ class AgentLoopResult:
     iterations: int = 0
     messages: list[Message] = field(default_factory=list)
     context_results: list[ContextResult] = field(default_factory=list)
+    composed_prompts: list[ComposedPrompt] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
     events: list[JobEvent] = field(default_factory=list)
 
@@ -78,17 +81,27 @@ class AgentLoop:
         input: str | Message | Sequence[Message | dict[str, Any]],
         *,
         history: Sequence[Message | dict[str, Any]] | None = None,
+        agent_context: AgentContext | dict[str, Any] | None = None,
     ) -> AgentLoopResult:
         events: list[JobEvent] = []
         context_results: list[ContextResult] = []
+        composed_prompts: list[ComposedPrompt] = []
         tool_results: list[ToolResult] = []
         history_messages = _normalize_message_sequence(history or [])
         active_messages = _normalize_loop_input(input)
+        base_agent_context = _normalize_agent_context(agent_context, active_messages)
 
         events.append(self._event("agent loop started", status="running"))
         for iteration in range(1, self.config.max_iterations + 1):
+            system_prompt, composed_prompt = await self._compose_system_prompt(
+                base_agent_context,
+                history_messages,
+                active_messages,
+            )
+            if composed_prompt is not None:
+                composed_prompts.append(composed_prompt)
             context = await self.context_provider.build_messages(
-                self.config.system_prompt,
+                system_prompt,
                 history_messages,
                 active_messages,
                 self.config.context_config,
@@ -164,6 +177,7 @@ class AgentLoop:
                                 iterations=iteration,
                                 messages=[*history_messages, *active_messages],
                                 context_results=context_results,
+                                composed_prompts=composed_prompts,
                                 tool_results=tool_results,
                                 events=events,
                             )
@@ -185,6 +199,7 @@ class AgentLoop:
                 iterations=iteration,
                 messages=[*history_messages, *active_messages],
                 context_results=context_results,
+                composed_prompts=composed_prompts,
                 tool_results=tool_results,
                 events=events,
             )
@@ -197,6 +212,7 @@ class AgentLoop:
             iterations=self.config.max_iterations,
             messages=[*history_messages, *active_messages],
             context_results=context_results,
+            composed_prompts=composed_prompts,
             tool_results=tool_results,
             events=events,
         )
@@ -209,6 +225,26 @@ class AgentLoop:
 
     def _event(self, message: str, **data: Any) -> JobEvent:
         return JobEvent.status(self.config.job_id, message, **data)
+
+    async def _compose_system_prompt(
+        self,
+        base_context: AgentContext,
+        history_messages: Sequence[Message],
+        active_messages: Sequence[Message],
+    ) -> tuple[str, ComposedPrompt | None]:
+        composer = self.config.prompt_composer
+        if composer is None:
+            return self.config.system_prompt, None
+        context = AgentContext(
+            task=base_context.task,
+            metadata=dict(base_context.metadata),
+            history_count=len(history_messages),
+            active_count=len(active_messages),
+        )
+        composed = composer.compose(self.config.system_prompt, context)
+        if inspect.isawaitable(composed):
+            composed = await composed
+        return composed.content, composed
 
 
 def _normalize_loop_input(
@@ -231,6 +267,25 @@ def _normalize_message(message: Message | dict[str, Any]) -> Message:
     if isinstance(message, Message):
         return _copy_message(message)
     return Message.from_dict(message)
+
+
+def _normalize_agent_context(
+    agent_context: AgentContext | dict[str, Any] | None,
+    active_messages: Sequence[Message],
+) -> AgentContext:
+    if isinstance(agent_context, AgentContext):
+        task = agent_context.task or _task_from_messages(active_messages)
+        return AgentContext(task=task, metadata=dict(agent_context.metadata))
+    if isinstance(agent_context, dict):
+        context = AgentContext.from_dict(agent_context)
+        context.task = context.task or _task_from_messages(active_messages)
+        return context
+    return AgentContext(task=_task_from_messages(active_messages))
+
+
+def _task_from_messages(messages: Sequence[Message]) -> str:
+    first_user = next((message for message in messages if message.role == "user"), None)
+    return _content_to_text(first_user.content) if first_user is not None else ""
 
 
 def _copy_message(message: Message) -> Message:

@@ -29,6 +29,7 @@ from keel_runtime.runtime import (
     KubernetesPodRuntime,
     PiRpcRuntime,
 )
+from keel_runtime.skills import AgentContext, ComposedPrompt, FileSkillComposer, PromptComposer
 from keel_runtime.specs import AgentSpec, ResourceLimits
 from keel_runtime.stores import ArtifactStore, JobStateStore, SessionStore, WorkspaceStore
 from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult, ToolSpec, ensure_tool_spec, tool
@@ -42,7 +43,9 @@ __all__ = [
     "AgentLoop",
     "AgentLoopConfig",
     "AgentLoopResult",
+    "AgentContext",
     "ChatClient",
+    "ComposedPrompt",
     "CleanupPolicy",
     "Collaboration",
     "CollaborationStatus",
@@ -68,9 +71,11 @@ __all__ = [
     "PiRpcRuntime",
     "PrefixStableContext",
     "ProviderRegistry",
+    "PromptComposer",
     "ResourceLimits",
     "S3ObjectStorage",
     "SessionStore",
+    "FileSkillComposer",
     "ToolCall",
     "ToolRegistry",
     "ToolResult",
