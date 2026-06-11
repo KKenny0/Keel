@@ -17,6 +17,7 @@ from keel_runtime.context import (
 )
 from keel_runtime.events import EventType, JobEvent
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
+from keel_runtime.loop import AgentLoop, AgentLoopConfig, AgentLoopResult, ChatClient
 from keel_runtime.manager import JobManager
 from keel_runtime.models import ModelConfig, ModelProvider, ModelUsage, ProviderRegistry
 from keel_runtime.object_storage import InMemoryObjectStorage, ObjectStorage, S3ObjectStorage
@@ -38,6 +39,10 @@ __all__ = [
     "AgentSpec",
     "ArtifactStore",
     "ArtifactInput",
+    "AgentLoop",
+    "AgentLoopConfig",
+    "AgentLoopResult",
+    "ChatClient",
     "CleanupPolicy",
     "Collaboration",
     "CollaborationStatus",
