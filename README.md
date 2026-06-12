@@ -19,25 +19,29 @@ pip install keel-runtime
 
 接入模式不是"部署 Keel 服务 再注册 agent",而是"加几行代码,你的代码获得生产级能力"。
 
-## Building Blocks
+## 设计原则
 
-| 模块 | 职责 | 状态 |
-| --- | --- | --- |
-| `AgentLoop` | LLM 调用,tool 执行,迭代控制,usage 上报 | done |
-| `PrefixStableContext` | token 预算,前缀稳定分区,已消费 tool result 清理,历史裁剪 | done |
-| `ToolRegistry` / `@tool` | 装饰器定义工具,自动生成 schema,注册和执行 | done |
-| `parse_output` / `extract_json` | 从 LLM 文本中提取 JSON,Pydantic 校验,文本 fallback | done |
-| `InProcessRuntime` | 把 Python async callable 包装成 Keel job | done |
-| `JobManager` | 创建、运行、停止、恢复、查询 job 和 collaboration | done |
-| `ModelConfig` | 结构化模型配置,声明式 fallback,provider 校验 | done |
-| `AgentSpec` / `AgentJob` | Agent 定义,job 状态,依赖,资源限制 | done |
-| `stores` | 本地文件系统 + S3/MinIO 持久化 | done |
-| `events` | 流式事件系统 | done |
-| `collaboration` | 多 Agent 协作,串行/并行,人工确认,重试 | done |
-| `@agent` / `Agent` | 极简装饰器入口,串起 client、context、tools、memory 和 gate | done |
-| `PromptComposer` | 技能注入协议 | done |
-| `HumanGate` | 独立确认原语 | done |
-| `MemoryProvider` / `LocalMemoryProvider` | 记忆存取协议和本地 JSONL 实现 | done |
+- **工具包,不是外壳。** pip install,加几行代码,你的代码获得能力。
+- **通用机制,不提供领域模式。** agent loop、context、tool protocol 是通用的;agent 怎么定义、pipeline 怎么串,你决定。
+- **Provider 协议,不锁实现。** ContextProvider、LLM client 都可以替换成你的实现。
+- **架构对齐 OpenAI Agents SDK 模式,模型不锁 OpenAI。** LLM 调用层 provider-agnostic,加 adapter 即可接入 Anthropic、Google 等。
+- **零外部依赖。** 核心包不依赖任何第三方库。
+
+## 安装
+
+Python 3.11+:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate       # Windows: .\.venv\Scripts\Activate.ps1
+pip install -e ".[dev,fastapi]"
+```
+
+S3/MinIO 持久化:
+
+```bash
+pip install -e ".[s3]"
+```
 
 ## Quick Start
 
@@ -119,6 +123,26 @@ python examples/quickstart_agent.py
 ```
 
 当你需要更细控制每轮迭代、历史或 job id 时,使用下面的 `AgentLoop` 底层 API。
+
+## Building Blocks
+
+| 模块 | 职责 |
+| --- | --- |
+| `AgentLoop` | LLM 调用,tool 执行,迭代控制,usage 上报 |
+| `PrefixStableContext` | token 预算,前缀稳定分区,已消费 tool result 清理,历史裁剪 |
+| `ToolRegistry` / `@tool` | 装饰器定义工具,自动生成 schema,注册和执行 |
+| `parse_output` / `extract_json` | 从 LLM 文本中提取 JSON,Pydantic 校验,文本 fallback |
+| `InProcessRuntime` | 把 Python async callable 包装成 Keel job |
+| `JobManager` | 创建、运行、停止、恢复、查询 job 和 collaboration |
+| `ModelConfig` | 结构化模型配置,声明式 fallback,provider 校验 |
+| `AgentSpec` / `AgentJob` | Agent 定义,job 状态,依赖,资源限制 |
+| `stores` | 本地文件系统 + S3/MinIO 持久化 |
+| `events` | 流式事件系统 |
+| `collaboration` | 多 Agent 协作,串行/并行,人工确认,重试 |
+| `@agent` / `Agent` | 极简装饰器入口,串起 client、context、tools、memory 和 gate |
+| `PromptComposer` | 技能注入协议 |
+| `HumanGate` | 独立确认原语 |
+| `MemoryProvider` / `LocalMemoryProvider` | 记忆存取协议和本地 JSONL 实现 |
 
 ## Agent Loop
 
@@ -386,89 +410,12 @@ step3 = manager.add_collaboration_step(
 manager.confirm_collaboration_step(collab_id, step3, note="approved")
 ```
 
-## 目录结构
-
-```text
-keel/
-  pyproject.toml
-  src/
-    keel_runtime/
-      __init__.py
-      loop.py            Agent loop
-      context.py         Context 管理
-      tools.py           Tool 协议
-      output.py          结构化输出
-      runtime.py         Runtime 适配器(InProcess / PiRpc / Docker / K8s)
-      manager.py         JobManager
-      specs.py           AgentSpec / ResourceLimits
-      jobs.py            AgentJob / JobStatus
-      models.py          ModelConfig / ModelUsage
-      collaboration.py   多 Agent 协作
-      stores.py          持久化存储
-      events.py          流式事件
-      security.py        密钥遮盖
-      cleanup.py         清理策略
-      object_storage.py  S3/MinIO 适配器
-      errors.py          异常层级
-  examples/
-    fastapi_app/         FastAPI 示例服务
-  tests/
-  design/                Logo 和视觉资源
-```
-
-## 安装
-
-Python 3.11+:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate       # Windows: .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev,fastapi]"
-```
-
-S3/MinIO 持久化:
-
-```bash
-pip install -e ".[s3]"
-```
-
 ## 开发和测试
 
 ```bash
 pytest
 ruff check .
 ```
-
-## 状态
-
-**Phase 1-5 已完成。** Phase 5.5 进行中。
-
-| Phase | 内容 | 状态 |
-| --- | --- | --- |
-| 1 | 本地单 Agent MVP | done |
-| 2 | 持久化和恢复 | done |
-| 3 | 生产运行边界(进程 / Docker / K8s) | done |
-| 4 | 任务接口和轻量编排 | done |
-| 4.1 | 模型 API 配置层 | done |
-| 5 | 多 Agent 协作 | done |
-| 5.5.1 | InProcessRuntime | done |
-| 5.5.2 | ContextProvider | done |
-| 5.5.3 | Tool 协议 + 结构化输出 | done |
-| 5.5.4 | Agent Loop MVP | done |
-| 5.5.5 | PromptComposer | done |
-| 5.5.6 | Human Gate | done |
-| 5.5.7 | MemoryProvider | done |
-| 5.5.8 | 参考项目验证 + Quickstart | in progress: quickstart API done |
-
-下一步:用 script-weaver 和 open-omnisearch 做参考项目验证,确认极简 API 的真实接入边界。
-
-## 设计原则
-
-- **工具包,不是外壳。** pip install,加几行代码,你的代码获得能力。
-- **通用机制,不提供领域模式。** agent loop、context、tool protocol 是通用的;agent 怎么定义、pipeline 怎么串,你决定。
-- **Provider 协议,不锁实现。** ContextProvider、LLM client 都可以替换成你的实现。
-- **架构对齐 OpenAI Agents SDK 模式,模型不锁 OpenAI。** LLM 调用层 provider-agnostic,加 adapter 即可接入 Anthropic、Google 等。
-- **零外部依赖。** 核心包不依赖任何第三方库。
 
 ## License
 
