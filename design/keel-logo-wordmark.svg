@@ -1,6 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 100">
-  <path d="M38,82 L5,25 L18,32 L38,62 Z" fill="#1a2332"/>
-  <path d="M46,82 L76,28 L63,34 L46,62 Z" fill="#1a2332"/>
-  <line x1="42" y1="64" x2="42" y2="80" stroke="#0ea5a0" stroke-width="1.2" stroke-linecap="round"/>
-  <text x="94" y="64" font-family="'Inter','Segoe UI',system-ui,-apple-system,sans-serif" font-size="42" font-weight="600" letter-spacing="-0.5" fill="#1a2332">Keel</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 228 100">
+  <!-- F2 icon: twin pillars with hull curvature + exposed teal keel -->
+  <line x1="53" y1="20.5" x2="53" y2="77.5" stroke="#0ea5a0" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M34.4,73.8 C31.3,60.2 31.3,47.8 34.4,41.6 L43.7,24.2 L51.8,41.6 L51.8,73.8 Z" fill="#1a2332"/>
+  <path d="M54.2,73.8 L54.2,41.6 L62.3,24.2 L71.6,41.6 C74.7,47.8 74.7,60.2 71.6,73.8 Z" fill="#1a2332"/>
+  <!-- Wordmark: Syne 800, tracking -0.5px -->
+  <path d="M603 315V371L1180 0H808L318 340L770 640H1126ZM70 640H320V0H70Z" transform="translate(86.00,62) scale(0.038,-0.038)" fill="#1a2332"/>
+  <path d="M721 176H957Q948 118 899.5 75.0Q851 32 758.5 8.5Q666 -15 523 -15Q372 -15 262.5 9.0Q153 33 94.0 90.0Q35 147 35 244Q35 340 92.5 397.5Q150 455 259.0 480.0Q368 505 523 505Q675 505 772.0 478.0Q869 451 915.0 390.5Q961 330 959 227H279Q284 201 307.5 179.0Q331 157 380.5 143.5Q430 130 513 130Q599 130 654.5 142.0Q710 154 721 176ZM513 360Q407 360 351.5 337.0Q296 314 286 291H726Q719 317 670.0 338.5Q621 360 513 360Z" transform="translate(131.72,62) scale(0.038,-0.038)" fill="#1a2332"/>
+  <path d="M721 176H957Q948 118 899.5 75.0Q851 32 758.5 8.5Q666 -15 523 -15Q372 -15 262.5 9.0Q153 33 94.0 90.0Q35 147 35 244Q35 340 92.5 397.5Q150 455 259.0 480.0Q368 505 523 505Q675 505 772.0 478.0Q869 451 915.0 390.5Q961 330 959 227H279Q284 201 307.5 179.0Q331 157 380.5 143.5Q430 130 513 130Q599 130 654.5 142.0Q710 154 721 176ZM513 360Q407 360 351.5 337.0Q296 314 286 291H726Q719 317 670.0 338.5Q621 360 513 360Z" transform="translate(169.04,62) scale(0.038,-0.038)" fill="#1a2332"/>
+  <path d="M60 690H300V0H60Z" transform="translate(206.36,62) scale(0.038,-0.038)" fill="#1a2332"/>
 </svg>
