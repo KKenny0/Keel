@@ -1,0 +1,1343 @@
+
+<!doctype html>
+<!--
+  Keel — 嵌入式 Agent 运行时工具包
+  Landing page + documentation index
+  Deploy to GitHub Pages
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Keel — 嵌入式 Agent 运行时工具包</title>
+  <link rel="icon" href="design/keel-logo-favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── tokens ─────────────────────────────────────────────────────────
+       Keel brand: navy #1a2332 + teal #0ea5a0
+       Direction: Human / approachable (Airbnb warmth, clean hierarchy) */
+    :root {
+      --bg:      #f5f6f8;
+      --surface: #ffffff;
+      --fg:      #1a2332;
+      --muted:   #5e6b7d;
+      --border:  #e2e5ea;
+      --accent:  #0ea5a0;
+
+      /* derived */
+      --accent-soft: color-mix(in oklch, var(--accent) 12%, transparent);
+      --accent-deep: color-mix(in oklch, var(--accent) 85%, black);
+      --fg-soft:     color-mix(in oklch, var(--fg) 5%, transparent);
+
+      /* code block palette (dark theme) */
+      --code-bg:     color-mix(in oklch, var(--fg) 96%, black);
+      --code-border: color-mix(in oklch, var(--fg) 70%, black);
+      --code-fg:     #c9d1d9;
+      --code-kw:     #ff7b72;
+      --code-fn:     #d2a8ff;
+      --code-str:    #a5d6ff;
+      --code-cm:     #6b7d8e;
+      --code-dec:    #ffa657;
+      --code-cls:    #79c0ff;
+
+      /* type */
+      --font-display: 'Syne', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --font-mono:    ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, 'Consolas', monospace;
+
+      /* scale */
+      --fs-h1: clamp(40px, 5.5vw, 72px);
+      --fs-h2: clamp(28px, 3.5vw, 44px);
+      --fs-h3: 20px;
+      --fs-lead: 18px;
+      --fs-body: 16px;
+      --fs-meta: 13px;
+
+      /* spacing — 8-point grid */
+      --gap-xs: 8px;
+      --gap-sm: 12px;
+      --gap-md: 20px;
+      --gap-lg: 32px;
+      --gap-xl: 56px;
+      --gap-2xl: 96px;
+      --container: 1120px;
+      --gutter: 32px;
+
+      --radius: 10px;
+      --radius-lg: 14px;
+    }
+
+    /* ─── reset & base ──────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: var(--fs-body);
+      line-height: 1.6;
+      text-rendering: geometricPrecision;
+    }
+    img, svg { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; }
+    p { text-wrap: pretty; }
+    h1, h2, h3, h4 { text-wrap: balance; }
+
+    /* ─── layout primitives ─────────────────────────────────────────── */
+    .container {
+      max-width: var(--container);
+      margin-inline: auto;
+      padding-inline: var(--gutter);
+    }
+    .section {
+      padding-block: clamp(48px, 8vw, var(--gap-2xl));
+    }
+    .section + .section { border-top: 1px solid var(--border); }
+    .stack { display: flex; flex-direction: column; }
+    .stack > * + * { margin-top: var(--gap-md); }
+    .row { display: flex; align-items: center; gap: var(--gap-md); }
+    .row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap-lg); }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap-lg); }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap-md); }
+    .grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: var(--gap-xl); align-items: start; }
+    .grid-1-2 { display: grid; grid-template-columns: 1fr 2fr; gap: var(--gap-xl); align-items: start; }
+    @media (max-width: 920px) {
+      .grid-2, .grid-3, .grid-4, .grid-2-1, .grid-1-2 { grid-template-columns: 1fr; }
+    }
+
+    /* ─── type ──────────────────────────────────────────────────────── */
+    .h1, h1 { font-family: var(--font-body); font-size: var(--fs-h1); line-height: 1.05; letter-spacing: -0.02em; margin: 0; font-weight: 800; }
+    .h2, h2 { font-family: var(--font-body); font-size: var(--fs-h2); line-height: 1.12; letter-spacing: -0.015em; margin: 0; font-weight: 800; }
+    .h3, h3 { font-size: var(--fs-h3); font-weight: 600; line-height: 1.35; letter-spacing: -0.005em; margin: 0; }
+    .lead   { font-size: var(--fs-lead); line-height: 1.6; color: var(--muted); max-width: 58ch; margin: 0; }
+    .eyebrow {
+      font-family: var(--font-body);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 var(--gap-md);
+    }
+    .meta { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--muted); }
+    .num  { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    /* ─── chrome: nav + footer ──────────────────────────────────────── */
+    .topnav {
+      position: sticky; top: 0; z-index: 10;
+      background: color-mix(in oklch, var(--bg) 92%, transparent);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topnav-inner { display: flex; align-items: center; justify-content: space-between; padding-block: 14px; }
+    .topnav .logo {
+      display: flex; align-items: center; gap: 10px;
+      font-family: var(--font-display); font-size: 19px; font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+    .topnav .logo svg { width: 28px; height: 28px; }
+    .topnav nav { display: flex; gap: var(--gap-lg); }
+    .topnav nav a { font-size: 14px; color: var(--muted); }
+    .topnav nav a:hover { color: var(--fg); }
+    .topnav-right { display: flex; align-items: center; gap: var(--gap-lg); }
+    .lang-toggle { display: inline-flex; align-items: center; font-size: 13px; }
+    .lang-toggle .lang-btn { background: none; border: none; padding: 4px 6px; color: var(--muted); font-size: 13px; cursor: pointer; transition: color 0.15s ease; }
+    .lang-toggle .lang-btn:hover { color: var(--fg); }
+    .lang-toggle .lang-btn.active { color: var(--accent); font-weight: 600; }
+    .lang-toggle .lang-sep { color: var(--border); user-select: none; margin: 0 2px; }
+    @media (max-width: 640px) {
+      .topnav nav { display: none; }
+      .topnav-right { gap: var(--gap-sm); }
+    }
+    .pagefoot { padding-block: var(--gap-xl); color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); font-family: var(--font-body); }
+    .pagefoot .row-between { flex-wrap: wrap; gap: var(--gap-md); }
+
+    /* ─── buttons ───────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 11px 20px;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      font-size: 15px;
+      font-weight: 500;
+      letter-spacing: -0.005em;
+      transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+    .btn-primary:hover { background: var(--accent-deep); }
+    .btn-secondary { background: transparent; color: var(--fg); border-color: var(--border); }
+    .btn-secondary:hover { border-color: var(--fg); }
+    .btn-ghost { background: transparent; color: var(--fg); border-color: transparent; padding-inline: 8px; }
+    .btn-ghost:hover { color: var(--accent); }
+    .btn-arrow::after { content: '\2192'; transition: transform 0.15s ease; }
+    .btn-arrow:hover::after { transform: translateX(2px); }
+
+    /* ─── card / surface ────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+    }
+    .card-flat { background: transparent; border: 0; padding: 0; }
+    .card-rule { background: transparent; border: 0; border-top: 1px solid var(--fg); padding: 24px 0 0; border-radius: 0; }
+
+    /* ─── feature cell ──────────────────────────────────────────────── */
+    .feature .feature-mark {
+      width: 36px; height: 36px;
+      display: grid; place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--accent);
+      margin-bottom: var(--gap-md);
+    }
+    .feature .feature-mark svg { width: 18px; height: 18px; }
+    .feature h3 { margin-bottom: 6px; }
+    .feature p  { margin: 0; color: var(--muted); font-size: 15px; }
+
+    /* ─── stat ──────────────────────────────────────────────────────── */
+    .stat .stat-num {
+      font-family: var(--font-display);
+      font-size: clamp(48px, 7vw, 80px);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+      color: var(--accent);
+      font-weight: 800;
+    }
+    .stat .stat-label { color: var(--muted); font-size: 14px; margin-top: 8px; max-width: 24ch; }
+    .stat .stat-unit  { font-size: 0.5em; opacity: 0.7; margin-left: 2px; }
+
+    /* ─── pill / tag ────────────────────────────────────────────────── */
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .tag {
+      display: inline-flex; align-items: center;
+      padding: 4px 10px;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 12px;
+    }
+
+    /* ─── image placeholder ────────────────────────────────────────── */
+    .ph-img {
+      background:
+        linear-gradient(135deg, var(--accent-soft), var(--fg-soft)),
+        var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      aspect-ratio: 16 / 10;
+      display: grid; place-items: center;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+    .ph-img.square    { aspect-ratio: 1 / 1; }
+    .ph-img.portrait  { aspect-ratio: 3 / 4; }
+    .ph-img.wide      { aspect-ratio: 16 / 9; }
+
+    /* ─── divider ───────────────────────────────────────────────────── */
+    .rule  { border: 0; border-top: 1px solid var(--border); margin: 0; }
+    .rule-strong { border: 0; border-top: 1px solid var(--fg); margin: 0; }
+
+    /* ─── hero variants ─────────────────────────────────────────────── */
+    .hero          { padding-block: clamp(64px, 10vw, 140px); }
+    .hero-center   { text-align: center; margin-inline: auto; }
+    .hero h1       { margin-bottom: var(--gap-md); }
+    .hero .lead    { margin-bottom: var(--gap-lg); margin-inline: auto; max-width: 52ch; }
+    .hero-cta      { display: inline-flex; gap: var(--gap-sm); flex-wrap: wrap; }
+    .hero-center .hero-cta { justify-content: center; }
+    .hero-split    { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-2xl); align-items: center; }
+    @media (max-width: 920px) { .hero-split { grid-template-columns: 1fr; } }
+
+    /* ─── code block ────────────────────────────────────────────────── */
+    .code-block {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      border-radius: var(--radius-lg);
+      padding: 28px 32px;
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+      line-height: 1.65;
+      overflow-x: auto;
+      position: relative;
+      border: 1px solid var(--code-border);
+    }
+    .code-block .kw   { color: var(--code-kw); }
+    .code-block .fn   { color: var(--code-fn); }
+    .code-block .str  { color: var(--code-str); }
+    .code-block .cm   { color: var(--code-cm); }
+    .code-block .dec  { color: var(--code-dec); }
+    .code-block .cls  { color: var(--code-cls); }
+    .code-block .op   { color: var(--code-fg); }
+    .code-block pre {
+      font-family: inherit;
+      margin: 0;
+      white-space: pre;
+    }
+    .code-block .file-label {
+      position: absolute; top: 10px; right: 16px;
+      font-size: 11px; color: var(--code-cm);
+      letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .code-install {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 20px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--fg);
+      cursor: pointer;
+      transition: border-color 0.15s ease;
+    }
+    .code-install:hover { border-color: var(--accent); }
+    .code-install .dollar { color: var(--muted); user-select: none; }
+
+    /* ─── log row ───────────────────────────────────────────────────── */
+    .log-row { display: grid; grid-template-columns: 140px 1fr 100px; gap: var(--gap-lg); padding: 22px 0; border-top: 1px solid var(--border); align-items: baseline; cursor: pointer; transition: background 0.15s ease; }
+    .log-row:hover { background: var(--fg-soft); }
+    .log-row .meta { color: var(--muted); }
+    .log-row h3 { font-size: 18px; }
+    .log-row .pull { text-align: right; }
+    .log-row p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    .log-row .expand-hint {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; color: var(--muted); margin-top: 6px;
+      font-family: var(--font-mono);
+      opacity: 0; transition: opacity 0.15s ease;
+    }
+    .log-row:hover .expand-hint { opacity: 1; }
+    .log-row .expand-hint svg { width: 14px; height: 14px; transition: transform 0.2s ease; }
+    .log-row.is-open .expand-hint svg { transform: rotate(90deg); }
+    .log-row.is-open .expand-hint { opacity: 1; color: var(--accent); }
+
+    /* expandable code panel under each module row */
+    .module-expand {
+      display: none;
+    }
+    .module-expand.is-open {
+      display: block;
+      animation: fadeInPanel 0.3s ease;
+    }
+    @keyframes fadeInPanel {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .module-expand-inner {
+      padding: 0 0 20px;
+    }
+    .module-expand .code-block {
+      margin-top: 0;
+    }
+    @media (max-width: 640px) {
+      .log-row { grid-template-columns: 1fr; gap: 4px; }
+      .log-row .pull { text-align: left; }
+      .module-expand .code-block { font-size: 12px; padding: 16px 18px; }
+    }
+
+    /* ─── ds-table ──────────────────────────────────────────────────── */
+    .ds-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .ds-table th, .ds-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    .ds-table th { color: var(--muted); font-weight: 500; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .ds-table tbody tr:hover { background: var(--fg-soft); }
+    .ds-table .num-col { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+    /* ─── principle cards ───────────────────────────────────────────── */
+    .principle-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--gap-lg);
+    }
+    @media (max-width: 920px) {
+      .principle-grid { grid-template-columns: 1fr; }
+    }
+    .principle-card {
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+    }
+    .principle-card h3 {
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .principle-card p {
+      color: var(--muted);
+      font-size: 15px;
+      margin: 0;
+      line-height: 1.55;
+    }
+
+    /* ─── hero logo mark ────────────────────────────────────────────── */
+    .hero-logo {
+      margin-bottom: var(--gap-lg);
+    }
+    .hero-logo svg {
+      width: 56px;
+      height: 56px;
+      margin-inline: auto;
+    }
+
+    /* ─── smooth scroll offset for sticky nav ───────────────────────── */
+    [id] { scroll-margin-top: 72px; }
+
+    /* ─── copy toast ────────────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--fg);
+      color: var(--surface);
+      padding: 10px 20px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      opacity: 0;
+      transition: transform 0.25s ease, opacity 0.25s ease;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ─── Topnav ─────────────────────────────────────────────────────── -->
+  <header class="topnav" data-od-id="topnav">
+    <div class="container topnav-inner">
+      <a href="#" class="logo">
+        <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <line x1="50" y1="4" x2="50" y2="96" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M20,90 C15,68 15,48 20,38 L35,10 L48,38 L48,90 Z" fill="var(--fg)"/>
+          <path d="M52,90 L52,38 L65,10 L80,38 C85,48 85,68 80,90 Z" fill="var(--fg)"/>
+        </svg>
+        Keel
+      </a>
+      <div class="topnav-right">
+      <nav>
+        <a href="#quickstart">Quick Start</a>
+        <a href="#features">核心能力</a>
+        <a href="#modules">模块</a>
+        <a href="#principles">设计原则</a>
+      </nav>
+      <span class="lang-toggle">
+        <button class="lang-btn" data-lang="en" onclick="setLang('en')">EN</button>
+        <span class="lang-sep">/</span>
+        <button class="lang-btn active" data-lang="zh" onclick="setLang('zh')">中文</button>
+      </span>
+      <a href="https://github.com/KKenny0/keel" class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="content">
+
+    <!-- ─── 1. Hero ────────────────────────────────────────────────────── -->
+    <section class="section hero" data-od-id="hero">
+      <div class="container hero-center">
+        <div class="hero-logo">
+          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <line x1="50" y1="4" x2="50" y2="96" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M20,90 C15,68 15,48 20,38 L35,10 L48,38 L48,90 Z" fill="var(--fg)"/>
+            <path d="M52,90 L52,38 L65,10 L80,38 C85,48 85,68 80,90 Z" fill="var(--fg)"/>
+          </svg>
+        </div>
+        <p class="eyebrow">Agent Runtime Toolkit</p>
+        <h1>给你的项目加上 Agent 能力</h1>
+        <p class="lead">Keel 是一个 Python 工具包。加几行代码，你的项目就能跑 Agent Loop、管理上下文、执行工具、输出结构化数据。</p>
+        <div style="margin: var(--gap-lg) 0;">
+          <div class="code-install" onclick="copyInstall()" title="点击复制">
+            <span class="dollar">$</span>
+            <span>pip install keel-runtime</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </div>
+        </div>
+        <div class="hero-cta">
+          <a href="#quickstart" class="btn btn-primary btn-arrow">5 分钟上手</a>
+          <a href="#modules" class="btn btn-secondary">浏览全部模块</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 2. Quick Start ─────────────────────────────────────────────── -->
+    <section class="section" id="quickstart" data-od-id="quickstart">
+      <div class="container hero-split">
+        <div>
+          <p class="eyebrow">Quick Start</p>
+          <h2>定义工具，加个装饰器，你就有了 Agent</h2>
+          <p class="lead" style="margin-top: 20px;">用 <code style="font-family: var(--font-mono); font-size: 0.9em;">@keel.tool</code> 定义工具，用 <code style="font-family: var(--font-mono); font-size: 0.9em;">@keel.agent</code> 把函数变成 Agent。不需要部署服务，不需要注册中心。</p>
+          <div style="margin-top: 28px;">
+            <a href="#modules" class="btn btn-ghost btn-arrow">深入了解每个模块</a>
+          </div>
+        </div>
+        <div class="code-block" style="border-radius: var(--radius-lg);">
+          <span class="file-label">quickstart_agent.py</span>
+<pre style="margin:0; white-space: pre; overflow-x: auto;"><span class="kw">import</span> <span class="cls">keel_runtime</span> <span class="kw">as</span> <span class="cls">keel</span>
+
+<span class="cm"># 1. 定义工具</span>
+<span class="dec">@keel.tool</span>(name=<span class="str">"get_weather"</span>,
+          description=<span class="str">"Get weather for a city"</span>)
+<span class="kw">def</span> <span class="fn">get_weather</span>(city: <span class="cls">str</span>) -> <span class="cls">str</span>:
+    <span class="kw">return</span> <span class="str">f"</span>{city}<span class="str">: 22C, sunny"</span>
+
+<span class="cm"># 2. 定义 Agent</span>
+<span class="dec">@keel.agent</span>(
+    client=MyLLMClient(),
+    tools=[get_weather],
+    system_prompt=<span class="str">"You are a weather assistant."</span>,
+    max_iterations=<span class="num">5</span>,
+)
+<span class="kw">async def</span> <span class="fn">weather_agent</span>(question: <span class="cls">str</span>) -> <span class="cls">str</span>:
+    <span class="kw">return</span> question
+
+<span class="cm"># 3. 调用</span>
+result = <span class="kw">await</span> <span class="fn">weather_agent</span>(<span class="str">"Tokyo weather?"</span>)
+<span class="fn">print</span>(result.output)  <span class="cm"># "Tokyo: 22C, sunny"</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 3. Features ────────────────────────────────────────────────── -->
+    <section class="section" id="features" data-od-id="features">
+      <div class="container stack" style="gap: 56px;">
+        <div style="max-width: 52ch;">
+          <p class="eyebrow">核心能力</p>
+          <h2>Agent 系统的通用骨架，你来填领域差异</h2>
+        </div>
+        <div class="grid-3">
+          <div class="feature card-flat">
+            <div class="feature-mark">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <h3>Agent Loop</h3>
+            <p>LLM 调用、工具执行、迭代控制、结构化输出解析，串成完整循环。你只管写 system prompt 和 output type。</p>
+          </div>
+          <div class="feature card-flat">
+            <div class="feature-mark">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/><path d="M10 12h4"/></svg>
+            </div>
+            <h3>Context 管理</h3>
+            <p>四分区 token 预算策略：System / Task / History / Active。自动裁剪已消费的 tool result，防止上下文爆炸。</p>
+          </div>
+          <div class="feature card-flat">
+            <div class="feature-mark">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+            </div>
+            <h3>Tool 协议</h3>
+            <p>装饰器定义工具，自动生成 JSON Schema，注册和执行一体化。支持同步和异步，校验入参和出参。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 4. Building Blocks (log-list style) ─────────────────────────── -->
+    <section class="section" id="modules" data-od-id="modules">
+      <div class="container">
+        <div class="row-between" style="margin-bottom: 32px; flex-wrap: wrap;">
+          <div style="max-width: 52ch;">
+            <p class="eyebrow">Building Blocks</p>
+            <h2>全部模块一览</h2>
+          </div>
+          <span class="meta">pip install keel-runtime · 零外部依赖</span>
+        </div>
+        <div id="module-list">
+          <!-- AgentLoop -->
+          <article class="log-row" data-module="agent-loop">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">AgentLoop</span>
+            <div>
+              <h3>LLM 调用 + 工具执行 + 迭代控制</h3>
+              <p>把 LLM client、context 组装、工具执行、输出解析串成完整循环。返回 status / output / iterations / 完整消息历史。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="pill">核心</span></span>
+          </article>
+          <div class="module-expand" data-module="agent-loop">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">agent_loop.py</span><pre><span class="kw">from</span> keel_runtime.loop <span class="kw">import</span> <span class="cls">AgentLoop</span>, <span class="cls">AgentLoopConfig</span>
+<span class="kw">from</span> keel_runtime.context <span class="kw">import</span> <span class="cls">Message</span>
+
+loop = <span class="cls">AgentLoop</span>(
+    config=<span class="cls">AgentLoopConfig</span>(max_iterations=<span class="dec">10</span>),
+    chat_client=my_llm_client,
+    tools=tool_registry,
+    context_provider=context,
+)
+
+result = <span class="kw">await</span> loop.run(
+    messages=[<span class="cls">Message</span>(role=<span class="str">"user"</span>, content=<span class="str">"分析这份报告"</span>)]
+)
+<span class="cm"># result.status → "completed" | "tool_limit" | ...</span>
+<span class="cm"># result.output → 最终文本输出</span>
+<span class="cm"># result.iterations → 迭代次数</span></pre></div>
+            </div>
+          </div>
+
+          <!-- PrefixStableContext -->
+          <article class="log-row" data-module="context">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">PrefixStableContext</span>
+            <div>
+              <h3>上下文管理</h3>
+              <p>token 预算、前缀稳定分区、已消费 tool result 清理、历史裁剪。四分区：SYSTEM → TASK → HISTORY → ACTIVE。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="pill">核心</span></span>
+          </article>
+          <div class="module-expand" data-module="context">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">context.py</span><pre><span class="kw">from</span> keel_runtime.context <span class="kw">import</span> <span class="cls">PrefixStableContext</span>, <span class="cls">ContextConfig</span>
+
+context = <span class="cls">PrefixStableContext</span>(
+    config=<span class="cls">ContextConfig</span>(max_tokens=<span class="dec">4096</span>),
+    system_prompt=<span class="str">"你是一个数据分析助手"</span>,
+)
+
+<span class="cm"># 四分区自动管理</span>
+context.set_task(<span class="str">"请分析 Q3 销售数据"</span>)
+context.add_history(<span class="cls">Message</span>(role=<span class="str">"user"</span>, content=<span class="str">"聚焦华东区"</span>))
+
+messages = context.assemble()  <span class="cm"># → 完整消息列表</span></pre></div>
+            </div>
+          </div>
+
+          <!-- ToolRegistry / @tool -->
+          <article class="log-row" data-module="tools">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">ToolRegistry / @tool</span>
+            <div>
+              <h3>工具注册与执行</h3>
+              <p>装饰器定义工具，自动生成参数 schema，注册和执行一体化。ToolCall 入参，ToolResult 出参。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">协议</span></span>
+          </article>
+          <div class="module-expand" data-module="tools">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">tools.py</span><pre><span class="kw">from</span> keel_runtime.tools <span class="kw">import</span> <span class="cls">ToolRegistry</span>
+
+registry = <span class="cls">ToolRegistry</span>()
+
+<span class="dec">@registry.tool</span>(description=<span class="str">"查询数据库"</span>)
+<span class="kw">def</span> <span class="fn">query_db</span>(sql: <span class="cls">str</span>, limit: <span class="cls">int</span> = <span class="dec">100</span>) -> <span class="cls">list</span>[<span class="cls">dict</span>]:
+    <span class="cm"># 自动生成 JSON Schema: {sql: str, limit: int}</span>
+    <span class="kw">return</span> execute(sql)[:limit]
+
+<span class="cm"># 执行工具调用</span>
+result = <span class="kw">await</span> registry.execute(<span class="cls">ToolCall</span>(
+    name=<span class="str">"query_db"</span>,
+    arguments={<span class="str">"sql"</span>: <span class="str">"SELECT * FROM orders"</span>}
+))
+<span class="cm"># result → ToolResult(output=..., success=True)</span></pre></div>
+            </div>
+          </div>
+
+          <!-- parse_output / extract_json -->
+          <article class="log-row" data-module="output">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">parse_output / extract_json</span>
+            <div>
+              <h3>结构化输出</h3>
+              <p>从 LLM 文本中提取 JSON，支持 markdown code block，Pydantic 校验，纯文本 fallback。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">输出</span></span>
+          </article>
+          <div class="module-expand" data-module="output">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">output.py</span><pre><span class="kw">from</span> keel_runtime.output <span class="kw">import</span> parse_output, extract_json
+<span class="kw">from</span> pydantic <span class="kw">import</span> <span class="cls">BaseModel</span>
+
+<span class="kw">class</span> <span class="cls">Analysis</span>(<span class="cls">BaseModel</span>):
+    summary: <span class="cls">str</span>
+    confidence: <span class="cls">float</span>
+
+llm_text = <span class="str">'这是分析结果 ```json\n{"summary": "增长趋势", "confidence": 0.92}\n```'</span>
+
+<span class="cm"># 自动提取 JSON + Pydantic 校验</span>
+result = parse_output(llm_text, model=<span class="cls">Analysis</span>)
+<span class="cm"># → Analysis(summary="增长趋势", confidence=0.92)</span>
+
+<span class="cm"># 纯提取，不校验</span>
+raw = extract_json(llm_text)  <span class="cm"># → {"summary": "增长趋势", ...}</span></pre></div>
+            </div>
+          </div>
+
+          <!-- InProcessRuntime -->
+          <article class="log-row" data-module="runtime">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">InProcessRuntime</span>
+            <div>
+              <h3>进程内运行时</h3>
+              <p>把 Python async callable 包装成 Keel job，不需要起子进程。适合单机、测试、快速验证。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">运行时</span></span>
+          </article>
+          <div class="module-expand" data-module="runtime">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">runtime.py</span><pre><span class="kw">from</span> keel_runtime.runtime <span class="kw">import</span> <span class="cls">InProcessRuntime</span>
+
+<span class="kw">async def</span> <span class="fn">my_agent</span>(payload: <span class="cls">dict</span>) -> <span class="cls">dict</span>:
+    <span class="cm"># 你的 Agent 逻辑</span>
+    <span class="kw">return</span> {<span class="str">"result"</span>: <span class="str">"done"</span>}
+
+runtime = <span class="cls">InProcessRuntime</span>(handler=my_agent)
+
+<span class="cm"># 无需子进程，直接在当前进程内运行</span>
+<span class="kw">async for</span> event <span class="kw">in</span> runtime.run(job, spec):
+    print(event.type, event.message)</pre></div>
+            </div>
+          </div>
+
+          <!-- JobManager -->
+          <article class="log-row" data-module="jobs">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">JobManager</span>
+            <div>
+              <h3>Job 生命周期管理</h3>
+              <p>创建、运行、停止、恢复、查询、导出。支持任务依赖和 artifact 传递。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">运行时</span></span>
+          </article>
+          <div class="module-expand" data-module="jobs">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">manager.py</span><pre><span class="kw">from</span> keel_runtime.manager <span class="kw">import</span> <span class="cls">JobManager</span>
+
+mgr = <span class="cls">JobManager</span>(store_path=<span class="str">"./keel_data"</span>)
+
+<span class="cm"># 创建并运行</span>
+job = <span class="kw">await</span> mgr.create(spec=my_agent_spec)
+<span class="kw">await</span> mgr.start(job.id)
+
+<span class="cm"># 查询状态</span>
+status = <span class="kw">await</span> mgr.get_status(job.id)
+
+<span class="cm"># 停止 / 恢复</span>
+<span class="kw">await</span> mgr.stop(job.id)
+<span class="kw">await</span> mgr.resume(job.id)
+
+<span class="cm"># 导出产物</span>
+artifacts = <span class="kw">await</span> mgr.export_artifacts(job.id)</pre></div>
+            </div>
+          </div>
+
+          <!-- ModelConfig -->
+          <article class="log-row" data-module="models">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">ModelConfig</span>
+            <div>
+              <h3>模型配置</h3>
+              <p>结构化模型配置，声明式 fallback，provider 校验。支持 OpenAI / Anthropic / 自定义 provider。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">配置</span></span>
+          </article>
+          <div class="module-expand" data-module="models">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">models.py</span><pre><span class="kw">from</span> keel_runtime.models <span class="kw">import</span> <span class="cls">ModelConfig</span>
+
+config = <span class="cls">ModelConfig</span>(
+    provider=<span class="str">"openai"</span>,
+    model=<span class="str">"gpt-4o"</span>,
+    temperature=<span class="dec">0.3</span>,
+    max_tokens=<span class="dec">2048</span>,
+    fallback=[
+        <span class="cls">ModelConfig</span>(provider=<span class="str">"anthropic"</span>, model=<span class="str">"claude-sonnet-4-20250514"</span>),
+    ]
+)
+
+<span class="cm"># Provider 校验 — 确保环境变量已配置</span>
+config.validate()
+<span class="cm"># 自动 fallback：主模型失败时切换到备选</span></pre></div>
+            </div>
+          </div>
+
+          <!-- AgentSpec / AgentJob -->
+          <article class="log-row" data-module="specs">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">AgentSpec / AgentJob</span>
+            <div>
+              <h3>Agent 定义与状态</h3>
+              <p>声明式 Agent 定义（名称、模型、资源限制），Job 跟踪运行状态和产物。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">配置</span></span>
+          </article>
+          <div class="module-expand" data-module="specs">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">specs.py</span><pre><span class="kw">from</span> keel_runtime.specs <span class="kw">import</span> <span class="cls">AgentSpec</span>
+<span class="kw">from</span> keel_runtime.jobs <span class="kw">import</span> <span class="cls">AgentJob</span>
+
+spec = <span class="cls">AgentSpec</span>(
+    name=<span class="str">"data-analyst"</span>,
+    model_config=my_model_config,
+    description=<span class="str">"分析业务数据并输出报告"</span>,
+    max_iterations=<span class="dec">20</span>,
+    tools=[query_db, generate_chart],
+)
+
+<span class="cm"># Job 跟踪运行状态</span>
+job = <span class="cls">AgentJob</span>(spec=spec)
+<span class="cm"># job.status → created / running / succeeded / failed</span></pre></div>
+            </div>
+          </div>
+
+          <!-- collaboration -->
+          <article class="log-row" data-module="collaboration">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">collaboration</span>
+            <div>
+              <h3>多 Agent 协作</h3>
+              <p>串行 / 并行编排，任务间 artifact 传递，人工确认步骤，重试策略。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">协作</span></span>
+          </article>
+          <div class="module-expand" data-module="collaboration">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">collaboration.py</span><pre><span class="kw">from</span> keel_runtime.collaboration <span class="kw">import</span> <span class="cls">Collaboration</span>, <span class="cls">Step</span>
+
+collab = <span class="cls">Collaboration</span>(
+    steps=[
+        <span class="cls">Step</span>(agent=research_agent, name=<span class="str">"调研"</span>),
+        <span class="cls">Step</span>(agent=writer_agent, name=<span class="str">"写作"</span>,
+             inputs=[<span class="cls">ArtifactInput</span>(from_step=<span class="str">"调研"</span>)]),
+        <span class="cls">Step</span>(agent=review_agent, name=<span class="str">"审核"</span>,
+             require_confirmation=<span class="dec">True</span>),
+    ]
+)
+
+result = <span class="kw">await</span> collab.run()
+<span class="cm"># artifact 自动在步骤间传递</span></pre></div>
+            </div>
+          </div>
+
+          <!-- stores -->
+          <article class="log-row" data-module="stores">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">stores</span>
+            <div>
+              <h3>持久化存储</h3>
+              <p>本地文件系统 + S3/MinIO 对象存储。Job 状态、产物、日志自动持久化。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">存储</span></span>
+          </article>
+          <div class="module-expand" data-module="stores">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">stores.py</span><pre><span class="kw">from</span> keel_runtime.stores <span class="kw">import</span> <span class="cls">LocalStore</span>
+
+store = <span class="cls">LocalStore</span>(base_path=<span class="str">"./data"</span>)
+
+<span class="cm"># 保存 Job 状态</span>
+<span class="kw">await</span> store.save_job(job)
+
+<span class="cm"># 保存产物</span>
+<span class="kw">await</span> store.save_artifact(job_id, key=<span class="str">"report"</span>, data=report_bytes)
+
+<span class="cm"># 查询历史</span>
+jobs = <span class="kw">await</span> store.list_jobs(status=<span class="str">"succeeded"</span>)
+<span class="cm"># S3/MinIO 通过 extras 按需引入</span></pre></div>
+            </div>
+          </div>
+
+          <!-- events -->
+          <article class="log-row" data-module="events">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">events</span>
+            <div>
+              <h3>流式事件</h3>
+              <p>实时事件流：Agent 启动、工具调用、输出就绪、错误。可订阅、可过滤。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">事件</span></span>
+          </article>
+          <div class="module-expand" data-module="events">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">events.py</span><pre><span class="kw">from</span> keel_runtime.events <span class="kw">import</span> <span class="cls">JobEvent</span>, <span class="cls">EventType</span>
+
+<span class="cm"># 事件流随 Job 运行实时产出</span>
+<span class="kw">async for</span> event <span class="kw">in</span> job.events():
+    <span class="kw">match</span> event.type:
+        <span class="kw">case</span> EventType.STATUS:
+            print(<span class="str">f"状态变更: </span>{event.message}<span class="str">"</span>)
+        <span class="kw">case</span> EventType.TOOL_CALL:
+            print(<span class="str">f"工具调用: </span>{event.data[<span class="str">'tool'</span>]}<span class="str">"</span>)
+        <span class="kw">case</span> EventType.OUTPUT:
+            print(<span class="str">f"输出就绪"</span>)
+        <span class="kw">case</span> EventType.ERROR:
+            print(<span class="str">f"错误: </span>{event.message}<span class="str">"</span>)</pre></div>
+            </div>
+          </div>
+
+          <!-- HumanGate -->
+          <article class="log-row" data-module="gate">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">HumanGate</span>
+            <div>
+              <h3>人工确认</h3>
+              <p>独立确认原语：在 Agent 工作流的关键步骤插入人工审批节点。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">安全</span></span>
+          </article>
+          <div class="module-expand" data-module="gate">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">gate.py</span><pre><span class="kw">from</span> keel_runtime.gate <span class="kw">import</span> <span class="cls">HumanGate</span>
+
+gate = <span class="cls">HumanGate</span>()
+
+<span class="cm"># 在关键步骤请求人工确认</span>
+request = gate.create_request(
+    action=<span class="str">"发送邮件"</span>,
+    reason=<span class="str">"Agent 生成了客户邮件，需要人工确认后发送"</span>,
+    payload={<span class="str">"to"</span>: <span class="str">"client@example.com"</span>, <span class="str">"body"</span>: <span class="str">"..."</span>},
+    timeout_seconds=<span class="dec">300</span>,
+)
+
+decision = <span class="kw">await</span> gate.wait_for_decision(request)
+<span class="cm"># decision.status → approved / rejected / timeout</span></pre></div>
+            </div>
+          </div>
+
+          <!-- MemoryProvider -->
+          <article class="log-row" data-module="memory">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">MemoryProvider</span>
+            <div>
+              <h3>记忆存取</h3>
+              <p>记忆协议 + 本地 JSONL 实现。Agent 可以跨轮次记住决策、偏好和关键信息。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">记忆</span></span>
+          </article>
+          <div class="module-expand" data-module="memory">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">memory.py</span><pre><span class="kw">from</span> keel_runtime.memory <span class="kw">import</span> <span class="cls">LocalMemoryProvider</span>
+
+memory = <span class="cls">LocalMemoryProvider</span>(path=<span class="str">"./memory"</span>)
+
+<span class="cm"># 存储决策</span>
+<span class="kw">await</span> memory.save_decision(<span class="cls">Decision</span>(
+    scope=<span class="str">"project-x"</span>,
+    title=<span class="str">"使用 PostgreSQL"</span>,
+    outcome=<span class="str">"选择 PG 而非 MySQL"</span>,
+    rationale=<span class="str">"需要 JSONB + 全文搜索"</span>,
+))
+
+<span class="cm"># 跨轮次检索</span>
+history = <span class="kw">await</span> memory.search(scope=<span class="str">"project-x"</span>)</pre></div>
+            </div>
+          </div>
+
+          <!-- PromptComposer -->
+          <article class="log-row" data-module="skills">
+            <span class="meta" style="font-size: 14px; color: var(--fg); font-weight: 600;">PromptComposer</span>
+            <div>
+              <h3>技能注入</h3>
+              <p>动态组装 system prompt，注入技能描述、工具说明、上下文片段。</p>
+              <span class="expand-hint"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>查看示例</span>
+            </div>
+            <span class="pull"><span class="tag">提示词</span></span>
+          </article>
+          <div class="module-expand" data-module="skills">
+            <div class="module-expand-inner">
+              <div class="code-block"><span class="file-label">skills.py</span><pre><span class="kw">from</span> keel_runtime.skills <span class="kw">import</span> <span class="cls">PromptComposer</span>, <span class="cls">AgentContext</span>
+
+composer = <span class="cls">PromptComposer</span>()
+
+<span class="cm"># 动态组装 system prompt</span>
+prompt = composer.compose(
+    task=<span class="str">"分析数据"</span>,
+    tools=registry.list_tools(),
+    skills=[<span class="str">"sql-query"</span>, <span class="str">"chart-gen"</span>],
+    memory_facts=[<span class="str">"用户偏好中文输出"</span>],
+)
+
+<span class="cm"># → 完整的 system prompt</span>
+<span class="cm"># 包含：角色定义 + 技能描述 + 工具 schema + 记忆注入</span></pre></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 5. Design Principles ───────────────────────────────────────── -->
+    <section class="section" id="principles" data-od-id="principles">
+      <div class="container stack" style="gap: var(--gap-xl);">
+        <div style="max-width: 52ch;">
+          <p class="eyebrow">设计原则</p>
+          <h2>为什么 Keel 长这样</h2>
+        </div>
+        <div class="principle-grid">
+          <div class="principle-card">
+            <h3>工具包，不是外壳</h3>
+            <p>pip install，加几行代码，你的代码获得能力。不需要部署 Keel 服务，不需要注册 Agent。你写 Python，Keel 提供运行时。</p>
+          </div>
+          <div class="principle-card">
+            <h3>通用机制，不提供领域模式</h3>
+            <p>Agent Loop、Context、Tool Protocol 是通用的。Agent 怎么定义、Pipeline 怎么串，你决定。Keel 不替你做架构选择。</p>
+          </div>
+          <div class="principle-card">
+            <h3>Provider 协议，不锁实现</h3>
+            <p>ContextProvider、LLM client 都可以替换成你的实现。架构对齐 OpenAI Agents SDK 模式，但模型不锁 OpenAI。</p>
+          </div>
+          <div class="principle-card">
+            <h3>零外部依赖</h3>
+            <p>核心包不依赖任何第三方库。S3 持久化、FastAPI 集成等通过 extras 按需引入。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 6. CTA Strip ───────────────────────────────────────────────── -->
+    <section class="section" id="cta" data-od-id="cta-strip" style="text-align: center;">
+      <div class="container" style="max-width: 600px;">
+        <h2 style="font-family: var(--font-body);">5 分钟，让你的代码拥有 Agent 能力</h2>
+        <p class="lead" style="margin: 16px auto 32px;">pip install keel-runtime，定义你的第一个工具和 Agent。</p>
+        <div class="hero-cta" style="justify-content: center;">
+          <a href="#quickstart" class="btn btn-primary">查看 Quick Start</a>
+          <a href="https://github.com/KKenny0/keel" class="btn btn-secondary">GitHub 仓库</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ─── Footer ──────────────────────────────────────────────────────── -->
+  <footer class="pagefoot" data-od-id="footer">
+    <div class="container row-between">
+      <span>&copy; Keel · MIT License</span>
+      <span class="meta">嵌入式 Agent 运行时工具包</span>
+    </div>
+  </footer>
+
+  <!-- ─── Copy toast ──────────────────────────────────────────────────── -->
+  <div class="toast" id="toast">已复制到剪贴板</div>
+
+  <script>
+    /* ── i18n translations ───────────────────────────────────────────── */
+    var translations = {
+      zh: {
+        title: 'Keel \u2014 \u5d4c\u5165\u5f0f Agent \u8fd0\u884c\u65f6\u5de5\u5177\u5305',
+        'nav.features': '\u6838\u5fc3\u80fd\u529b',
+        'nav.modules': '\u6a21\u5757',
+        'nav.principles': '\u8bbe\u8ba1\u539f\u5219',
+        'hero.eyebrow': 'Agent Runtime Toolkit',
+        'hero.title': '\u7ed9\u4f60\u7684\u9879\u76ee\u52a0\u4e0a Agent \u80fd\u529b',
+        'hero.lead': 'Keel \u662f\u4e00\u4e2a Python \u5de5\u5177\u5305\u3002\u52a0\u51e0\u884c\u4ee3\u7801\uff0c\u4f60\u7684\u9879\u76ee\u5c31\u80fd\u8dd1 Agent Loop\u3001\u7ba1\u7406\u4e0a\u4e0b\u6587\u3001\u6267\u884c\u5de5\u5177\u3001\u8f93\u51fa\u7ed3\u6784\u5316\u6570\u636e\u3002',
+        'hero.cta1': '5 \u5206\u949f\u4e0a\u624b',
+        'hero.cta2': '\u6d4f\u89c8\u5168\u90e8\u6a21\u5757',
+        'qs.eyebrow': 'Quick Start',
+        'qs.title': '\u5b9a\u4e49\u5de5\u5177\uff0c\u52a0\u4e2a\u88c5\u9970\u5668\uff0c\u4f60\u5c31\u6709\u4e86 Agent',
+        'qs.lead': '\u7528 <code style="font-family: var(--font-mono); font-size: 0.9em;">@keel.tool</code> \u5b9a\u4e49\u5de5\u5177\uff0c\u7528 <code style="font-family: var(--font-mono); font-size: 0.9em;">@keel.agent</code> \u628a\u51fd\u6570\u53d8\u6210 Agent\u3002\u4e0d\u9700\u8981\u90e8\u7f72\u670d\u52a1\uff0c\u4e0d\u9700\u8981\u6ce8\u518c\u4e2d\u5fc3\u3002',
+        'qs.cta': '\u6df1\u5165\u4e86\u89e3\u6bcf\u4e2a\u6a21\u5757',
+        'feat.eyebrow': '\u6838\u5fc3\u80fd\u529b',
+        'feat.title': 'Agent \u7cfb\u7edf\u7684\u901a\u7528\u9aa8\u67b6\uff0c\u4f60\u6765\u586b\u9886\u57df\u5dee\u5f02',
+        'feat.loop.title': 'Agent Loop',
+        'feat.loop.desc': 'LLM \u8c03\u7528\u3001\u5de5\u5177\u6267\u884c\u3001\u8fed\u4ee3\u63a7\u5236\u3001\u7ed3\u6784\u5316\u8f93\u51fa\u89e3\u6790\uff0c\u4e32\u6210\u5b8c\u6574\u5faa\u73af\u3002\u4f60\u53ea\u7ba1\u5199 system prompt \u548c output type\u3002',
+        'feat.ctx.title': 'Context \u7ba1\u7406',
+        'feat.ctx.desc': '\u56db\u5206\u533a token \u9884\u7b97\u7b56\u7565\uff1aSystem / Task / History / Active\u3002\u81ea\u52a8\u88c1\u526a\u5df2\u6d88\u8d39\u7684 tool result\uff0c\u9632\u6b62\u4e0a\u4e0b\u6587\u7206\u70b8\u3002',
+        'feat.tool.title': 'Tool \u534f\u8bae',
+        'feat.tool.desc': '\u88c5\u9970\u5668\u5b9a\u4e49\u5de5\u5177\uff0c\u81ea\u52a8\u751f\u6210 JSON Schema\uff0c\u6ce8\u518c\u548c\u6267\u884c\u4e00\u4f53\u5316\u3002\u652f\u6301\u540c\u6b65\u548c\u5f02\u6b65\uff0c\u6821\u9a8c\u5165\u53c2\u548c\u51fa\u53c2\u3002',
+        'mod.eyebrow': 'Building Blocks',
+        'mod.title': '\u5168\u90e8\u6a21\u5757\u4e00\u89c8',
+        'mod.meta': 'pip install keel-runtime \u00b7 \u96f6\u5916\u90e8\u4f9d\u8d56',
+        'm.agent-loop.title': 'LLM \u8c03\u7528 + \u5de5\u5177\u6267\u884c + \u8fed\u4ee3\u63a7\u5236',
+        'm.agent-loop.desc': '\u628a LLM client\u3001context \u7ec4\u88c5\u3001\u5de5\u5177\u6267\u884c\u3001\u8f93\u51fa\u89e3\u6790\u4e32\u6210\u5b8c\u6574\u5faa\u73af\u3002\u8fd4\u56de status / output / iterations / \u5b8c\u6574\u6d88\u606f\u5386\u53f2\u3002',
+        'm.agent-loop.tag': '\u6838\u5fc3',
+        'm.context.title': '\u4e0a\u4e0b\u6587\u7ba1\u7406',
+        'm.context.desc': 'token \u9884\u7b97\u3001\u524d\u7f00\u7a33\u5b9a\u5206\u533a\u3001\u5df2\u6d88\u8d39 tool result \u6e05\u7406\u3001\u5386\u53f2\u88c1\u526a\u3002\u56db\u5206\u533a\uff1aSYSTEM \u2192 TASK \u2192 HISTORY \u2192 ACTIVE\u3002',
+        'm.context.tag': '\u6838\u5fc3',
+        'm.tools.title': '\u5de5\u5177\u6ce8\u518c\u4e0e\u6267\u884c',
+        'm.tools.desc': '\u88c5\u9970\u5668\u5b9a\u4e49\u5de5\u5177\uff0c\u81ea\u52a8\u751f\u6210\u53c2\u6570 schema\uff0c\u6ce8\u518c\u548c\u6267\u884c\u4e00\u4f53\u5316\u3002ToolCall \u5165\u53c2\uff0cToolResult \u51fa\u53c2\u3002',
+        'm.tools.tag': '\u534f\u8bae',
+        'm.output.title': '\u7ed3\u6784\u5316\u8f93\u51fa',
+        'm.output.desc': '\u4ece LLM \u6587\u672c\u4e2d\u63d0\u53d6 JSON\uff0c\u652f\u6301 markdown code block\uff0cPydantic \u6821\u9a8c\uff0c\u7eaf\u6587\u672c fallback\u3002',
+        'm.output.tag': '\u8f93\u51fa',
+        'm.runtime.title': '\u8fdb\u7a0b\u5185\u8fd0\u884c\u65f6',
+        'm.runtime.desc': '\u628a Python async callable \u5305\u88c5\u6210 Keel job\uff0c\u4e0d\u9700\u8981\u8d77\u5b50\u8fdb\u7a0b\u3002\u9002\u5408\u5355\u673a\u3001\u6d4b\u8bd5\u3001\u5feb\u901f\u9a8c\u8bc1\u3002',
+        'm.runtime.tag': '\u8fd0\u884c\u65f6',
+        'm.jobs.title': 'Job \u751f\u547d\u5468\u671f\u7ba1\u7406',
+        'm.jobs.desc': '\u521b\u5efa\u3001\u8fd0\u884c\u3001\u505c\u6b62\u3001\u6062\u590d\u3001\u67e5\u8be2\u3001\u5bfc\u51fa\u3002\u652f\u6301\u4efb\u52a1\u4f9d\u8d56\u548c artifact \u4f20\u9012\u3002',
+        'm.jobs.tag': '\u8fd0\u884c\u65f6',
+        'm.models.title': '\u6a21\u578b\u914d\u7f6e',
+        'm.models.desc': '\u7ed3\u6784\u5316\u6a21\u578b\u914d\u7f6e\uff0c\u58f0\u660e\u5f0f fallback\uff0cprovider \u6821\u9a8c\u3002\u652f\u6301 OpenAI / Anthropic / \u81ea\u5b9a\u4e49 provider\u3002',
+        'm.models.tag': '\u914d\u7f6e',
+        'm.specs.title': 'Agent \u5b9a\u4e49\u4e0e\u72b6\u6001',
+        'm.specs.desc': '\u58f0\u660e\u5f0f Agent \u5b9a\u4e49\uff08\u540d\u79f0\u3001\u6a21\u578b\u3001\u8d44\u6e90\u9650\u5236\uff09\uff0cJob \u8ddf\u8e2a\u8fd0\u884c\u72b6\u6001\u548c\u4ea7\u7269\u3002',
+        'm.specs.tag': '\u914d\u7f6e',
+        'm.collaboration.title': '\u591a Agent \u534f\u4f5c',
+        'm.collaboration.desc': '\u4e32\u884c / \u5e76\u884c\u7f16\u6392\uff0c\u4efb\u52a1\u95f4 artifact \u4f20\u9012\uff0c\u4eba\u5de5\u786e\u8ba4\u6b65\u9aa4\uff0c\u91cd\u8bd5\u7b56\u7565\u3002',
+        'm.collaboration.tag': '\u534f\u4f5c',
+        'm.stores.title': '\u6301\u4e45\u5316\u5b58\u50a8',
+        'm.stores.desc': '\u672c\u5730\u6587\u4ef6\u7cfb\u7edf + S3/MinIO \u5bf9\u8c61\u5b58\u50a8\u3002Job \u72b6\u6001\u3001\u4ea7\u7269\u3001\u65e5\u5fd7\u81ea\u52a8\u6301\u4e45\u5316\u3002',
+        'm.stores.tag': '\u5b58\u50a8',
+        'm.events.title': '\u6d41\u5f0f\u4e8b\u4ef6',
+        'm.events.desc': '\u5b9e\u65f6\u4e8b\u4ef6\u6d41\uff1aAgent \u542f\u52a8\u3001\u5de5\u5177\u8c03\u7528\u3001\u8f93\u51fa\u5c31\u7eea\u3001\u9519\u8bef\u3002\u53ef\u8ba2\u9605\u3001\u53ef\u8fc7\u6ee4\u3002',
+        'm.events.tag': '\u4e8b\u4ef6',
+        'm.gate.title': '\u4eba\u5de5\u786e\u8ba4',
+        'm.gate.desc': '\u72ec\u7acb\u786e\u8ba4\u539f\u8bed\uff1a\u5728 Agent \u5de5\u4f5c\u6d41\u7684\u5173\u952e\u6b65\u9aa4\u63d2\u5165\u4eba\u5de5\u5ba1\u6279\u8282\u70b9\u3002',
+        'm.gate.tag': '\u5b89\u5168',
+        'm.memory.title': '\u8bb0\u5fc6\u5b58\u53d6',
+        'm.memory.desc': '\u8bb0\u5fc6\u534f\u8bae + \u672c\u5730 JSONL \u5b9e\u73b0\u3002Agent \u53ef\u4ee5\u8de8\u8f6e\u6b21\u8bb0\u4f4f\u51b3\u7b56\u3001\u504f\u597d\u548c\u5173\u952e\u4fe1\u606f\u3002',
+        'm.memory.tag': '\u8bb0\u5fc6',
+        'm.skills.title': '\u6280\u80fd\u6ce8\u5165',
+        'm.skills.desc': '\u52a8\u6001\u7ec4\u88c5 system prompt\uff0c\u6ce8\u5165\u6280\u80fd\u63cf\u8ff0\u3001\u5de5\u5177\u8bf4\u660e\u3001\u4e0a\u4e0b\u6587\u7247\u6bb5\u3002',
+        'm.skills.tag': '\u63d0\u793a\u8bcd',
+        'expand.hint': '\u67e5\u770b\u793a\u4f8b',
+        'princ.eyebrow': '\u8bbe\u8ba1\u539f\u5219',
+        'princ.title': '\u4e3a\u4ec0\u4e48 Keel \u957f\u8fd9\u6837',
+        'princ.1.title': '\u5de5\u5177\u5305\uff0c\u4e0d\u662f\u5916\u58f3',
+        'princ.1.desc': 'pip install\uff0c\u52a0\u51e0\u884c\u4ee3\u7801\uff0c\u4f60\u7684\u4ee3\u7801\u83b7\u5f97\u80fd\u529b\u3002\u4e0d\u9700\u8981\u90e8\u7f72 Keel \u670d\u52a1\uff0c\u4e0d\u9700\u8981\u6ce8\u518c Agent\u3002\u4f60\u5199 Python\uff0cKeel \u63d0\u4f9b\u8fd0\u884c\u65f6\u3002',
+        'princ.2.title': '\u901a\u7528\u673a\u5236\uff0c\u4e0d\u63d0\u4f9b\u9886\u57df\u6a21\u5f0f',
+        'princ.2.desc': 'Agent Loop\u3001Context\u3001Tool Protocol \u662f\u901a\u7528\u7684\u3002Agent \u600e\u4e48\u5b9a\u4e49\u3001Pipeline \u600e\u4e48\u4e32\uff0c\u4f60\u51b3\u5b9a\u3002Keel \u4e0d\u66ff\u4f60\u505a\u67b6\u6784\u9009\u62e9\u3002',
+        'princ.3.title': 'Provider \u534f\u8bae\uff0c\u4e0d\u9501\u5b9e\u73b0',
+        'princ.3.desc': 'ContextProvider\u3001LLM client \u90fd\u53ef\u4ee5\u66ff\u6362\u6210\u4f60\u7684\u5b9e\u73b0\u3002\u67b6\u6784\u5bf9\u9f50 OpenAI Agents SDK \u6a21\u5f0f\uff0c\u4f46\u6a21\u578b\u4e0d\u9501 OpenAI\u3002',
+        'princ.4.title': '\u96f6\u5916\u90e8\u4f9d\u8d56',
+        'princ.4.desc': '\u6838\u5fc3\u5305\u4e0d\u4f9d\u8d56\u4efb\u4f55\u7b2c\u4e09\u65b9\u5e93\u3002S3 \u6301\u4e45\u5316\u3001FastAPI \u96c6\u6210\u7b49\u901a\u8fc7 extras \u6309\u9700\u5f15\u5165\u3002',
+        'cta.title': '5 \u5206\u949f\uff0c\u8ba9\u4f60\u7684\u4ee3\u7801\u62e5\u6709 Agent \u80fd\u529b',
+        'cta.lead': 'pip install keel-runtime\uff0c\u5b9a\u4e49\u4f60\u7684\u7b2c\u4e00\u4e2a\u5de5\u5177\u548c Agent\u3002',
+        'cta.btn1': '\u67e5\u770b Quick Start',
+        'cta.btn2': 'GitHub \u4ed3\u5e93',
+        'footer.desc': '\u5d4c\u5165\u5f0f Agent \u8fd0\u884c\u65f6\u5de5\u5177\u5305',
+        'toast.copied': '\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f'
+      },
+      en: {
+        title: 'Keel \u2014 Embedded Agent Runtime Toolkit',
+        'nav.features': 'Features',
+        'nav.modules': 'Modules',
+        'nav.principles': 'Principles',
+        'hero.eyebrow': 'Agent Runtime Toolkit',
+        'hero.title': 'Add Agent Power to Your Project',
+        'hero.lead': 'Keel is a Python toolkit. Add a few lines of code and your project can run Agent Loops, manage context, execute tools, and output structured data.',
+        'hero.cta1': 'Get Started in 5 Min',
+        'hero.cta2': 'Browse All Modules',
+        'qs.eyebrow': 'Quick Start',
+        'qs.title': 'Define tools, add a decorator, and you have an Agent',
+        'qs.lead': 'Define tools with <code style="font-family: var(--font-mono); font-size: 0.9em;">@keel.tool</code>, turn functions into Agents with <code style="font-family: var(--font-mono); font-size: 0.9em;">@keel.agent</code>. No service deployment, no registry needed.',
+        'qs.cta': 'Deep Dive into Each Module',
+        'feat.eyebrow': 'Core Capabilities',
+        'feat.title': 'The universal skeleton for Agent systems \u2014 you fill in the domain specifics',
+        'feat.loop.title': 'Agent Loop',
+        'feat.loop.desc': 'LLM calls, tool execution, iteration control, and structured output parsing in a complete loop. You just write the system prompt and output type.',
+        'feat.ctx.title': 'Context Management',
+        'feat.ctx.desc': 'Four-zone token budget strategy: System / Task / History / Active. Auto-trims consumed tool results to prevent context explosion.',
+        'feat.tool.title': 'Tool Protocol',
+        'feat.tool.desc': 'Decorator-defined tools with auto-generated JSON Schema. Unified registration and execution. Supports sync and async, validates inputs and outputs.',
+        'mod.eyebrow': 'Building Blocks',
+        'mod.title': 'All Modules at a Glance',
+        'mod.meta': 'pip install keel-runtime \u00b7 Zero external dependencies',
+        'm.agent-loop.title': 'LLM Calls + Tool Execution + Iteration Control',
+        'm.agent-loop.desc': 'Chain LLM client, context assembly, tool execution, and output parsing into a complete loop. Returns status / output / iterations / full message history.',
+        'm.agent-loop.tag': 'Core',
+        'm.context.title': 'Context Management',
+        'm.context.desc': 'Token budgets, prefix-stable partitioning, consumed tool result cleanup, and history trimming. Four zones: SYSTEM \u2192 TASK \u2192 HISTORY \u2192 ACTIVE.',
+        'm.context.tag': 'Core',
+        'm.tools.title': 'Tool Registration & Execution',
+        'm.tools.desc': 'Decorator-defined tools with auto-generated parameter schemas. Unified registration and execution. ToolCall in, ToolResult out.',
+        'm.tools.tag': 'Protocol',
+        'm.output.title': 'Structured Output',
+        'm.output.desc': 'Extract JSON from LLM text. Supports markdown code blocks, Pydantic validation, and plain text fallback.',
+        'm.output.tag': 'Output',
+        'm.runtime.title': 'In-Process Runtime',
+        'm.runtime.desc': 'Wrap Python async callables as Keel jobs without spawning subprocesses. Ideal for single-machine, testing, and quick validation.',
+        'm.runtime.tag': 'Runtime',
+        'm.jobs.title': 'Job Lifecycle Management',
+        'm.jobs.desc': 'Create, run, stop, resume, query, and export. Supports task dependencies and artifact passing.',
+        'm.jobs.tag': 'Runtime',
+        'm.models.title': 'Model Configuration',
+        'm.models.desc': 'Structured model config, declarative fallback, provider validation. Supports OpenAI / Anthropic / custom providers.',
+        'm.models.tag': 'Config',
+        'm.specs.title': 'Agent Definition & State',
+        'm.specs.desc': 'Declarative Agent definitions (name, model, resource limits). Jobs track runtime state and artifacts.',
+        'm.specs.tag': 'Config',
+        'm.collaboration.title': 'Multi-Agent Collaboration',
+        'm.collaboration.desc': 'Serial / parallel orchestration, inter-task artifact passing, human approval steps, and retry strategies.',
+        'm.collaboration.tag': 'Collaboration',
+        'm.stores.title': 'Persistent Storage',
+        'm.stores.desc': 'Local filesystem + S3/MinIO object storage. Job state, artifacts, and logs are automatically persisted.',
+        'm.stores.tag': 'Storage',
+        'm.events.title': 'Streaming Events',
+        'm.events.desc': 'Real-time event stream: agent startup, tool calls, output ready, errors. Subscribable and filterable.',
+        'm.events.tag': 'Events',
+        'm.gate.title': 'Human Approval',
+        'm.gate.desc': 'Standalone approval primitive: insert human review nodes at critical steps in Agent workflows.',
+        'm.gate.tag': 'Safety',
+        'm.memory.title': 'Memory Provider',
+        'm.memory.desc': 'Memory protocol + local JSONL implementation. Agents remember decisions, preferences, and key info across turns.',
+        'm.memory.tag': 'Memory',
+        'm.skills.title': 'Skill Injection',
+        'm.skills.desc': 'Dynamically assemble system prompts. Inject skill descriptions, tool instructions, and context snippets.',
+        'm.skills.tag': 'Prompt',
+        'expand.hint': 'View Example',
+        'princ.eyebrow': 'Design Principles',
+        'princ.title': 'Why Keel Is Built This Way',
+        'princ.1.title': 'Toolkit, Not a Shell',
+        'princ.1.desc': 'pip install, add a few lines, and your code gains capabilities. No Keel service to deploy, no Agent registry. You write Python, Keel provides the runtime.',
+        'princ.2.title': 'Generic Mechanisms, No Domain Patterns',
+        'princ.2.desc': 'Agent Loop, Context, and Tool Protocol are generic. How you define Agents and chain Pipelines is up to you. Keel doesn\'t make architecture choices for you.',
+        'princ.3.title': 'Provider Protocol, No Lock-in',
+        'princ.3.desc': 'ContextProvider and LLM client can be swapped with your implementations. Architecture aligns with OpenAI Agents SDK patterns, but models aren\'t locked to OpenAI.',
+        'princ.4.title': 'Zero External Dependencies',
+        'princ.4.desc': 'The core package has zero third-party dependencies. S3 persistence, FastAPI integration, and more are available via extras when needed.',
+        'cta.title': '5 Minutes to Give Your Code Agent Powers',
+        'cta.lead': 'pip install keel-runtime. Define your first tool and Agent.',
+        'cta.btn1': 'View Quick Start',
+        'cta.btn2': 'GitHub Repo',
+        'footer.desc': 'Embedded Agent Runtime Toolkit',
+        'toast.copied': 'Copied to clipboard'
+      }
+    };
+
+    var moduleKeys = ['agent-loop','context','tools','output','runtime','jobs','models','specs','collaboration','stores','events','gate','memory','skills'];
+
+    function setLang(lang) {
+      var t = translations[lang];
+      if (!t) return;
+
+      /* html lang + page title */
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.title = t.title;
+
+      /* nav links (index 0 = Quick Start, kept as-is) */
+      var navLinks = document.querySelectorAll('.topnav nav a');
+      navLinks[1].textContent = t['nav.features'];
+      navLinks[2].textContent = t['nav.modules'];
+      navLinks[3].textContent = t['nav.principles'];
+
+      /* hero */
+      document.querySelector('.hero .eyebrow').textContent = t['hero.eyebrow'];
+      document.querySelector('.hero h1').textContent = t['hero.title'];
+      document.querySelector('.hero .lead').textContent = t['hero.lead'];
+      document.querySelector('.hero .btn-primary').textContent = t['hero.cta1'];
+      document.querySelector('.hero .btn-secondary').textContent = t['hero.cta2'];
+
+      /* quick start */
+      document.querySelector('#quickstart .eyebrow').textContent = t['qs.eyebrow'];
+      document.querySelector('#quickstart h2').textContent = t['qs.title'];
+      document.querySelector('#quickstart .lead').innerHTML = t['qs.lead'];
+      document.querySelector('#quickstart .btn-ghost').textContent = t['qs.cta'];
+
+      /* features */
+      document.querySelector('#features .eyebrow').textContent = t['feat.eyebrow'];
+      document.querySelector('#features h2').textContent = t['feat.title'];
+      var features = document.querySelectorAll('#features .feature');
+      features[0].querySelector('h3').textContent = t['feat.loop.title'];
+      features[0].querySelector('p').textContent = t['feat.loop.desc'];
+      features[1].querySelector('h3').textContent = t['feat.ctx.title'];
+      features[1].querySelector('p').textContent = t['feat.ctx.desc'];
+      features[2].querySelector('h3').textContent = t['feat.tool.title'];
+      features[2].querySelector('p').textContent = t['feat.tool.desc'];
+
+      /* modules header */
+      document.querySelector('#modules .eyebrow').textContent = t['mod.eyebrow'];
+      document.querySelector('#modules h2').textContent = t['mod.title'];
+      document.querySelector('#modules .meta').textContent = t['mod.meta'];
+
+      /* module rows */
+      moduleKeys.forEach(function(mod) {
+        var row = document.querySelector('.log-row[data-module="' + mod + '"]');
+        if (!row) return;
+        var h3 = row.querySelector('h3');
+        var p = row.querySelector('p');
+        var pill = row.querySelector('.pill, .tag');
+        var hint = row.querySelector('.expand-hint');
+        if (h3) h3.textContent = t['m.' + mod + '.title'];
+        if (p) p.textContent = t['m.' + mod + '.desc'];
+        if (pill) pill.textContent = t['m.' + mod + '.tag'];
+        if (hint) {
+          for (var i = 0; i < hint.childNodes.length; i++) {
+            if (hint.childNodes[i].nodeType === 3) {
+              hint.childNodes[i].textContent = t['expand.hint'];
+            }
+          }
+        }
+      });
+
+      /* design principles */
+      document.querySelector('#principles .eyebrow').textContent = t['princ.eyebrow'];
+      document.querySelector('#principles h2').textContent = t['princ.title'];
+      var princCards = document.querySelectorAll('#principles .principle-card');
+      ['1','2','3','4'].forEach(function(i, idx) {
+        princCards[idx].querySelector('h3').textContent = t['princ.' + i + '.title'];
+        princCards[idx].querySelector('p').textContent = t['princ.' + i + '.desc'];
+      });
+
+      /* cta strip */
+      document.querySelector('#cta h2').textContent = t['cta.title'];
+      document.querySelector('#cta .lead').textContent = t['cta.lead'];
+      document.querySelector('#cta .btn-primary').textContent = t['cta.btn1'];
+      document.querySelector('#cta .btn-secondary').textContent = t['cta.btn2'];
+
+      /* footer */
+      document.querySelector('.pagefoot .meta').textContent = t['footer.desc'];
+
+      /* toast */
+      document.getElementById('toast').textContent = t['toast.copied'];
+
+      /* toggle button active state */
+      document.querySelectorAll('.lang-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.lang === lang);
+      });
+
+      /* persist */
+      localStorage.setItem('keel-lang', lang);
+    }
+
+    /* ── init: restore saved language ──────────────────────────────── */
+    (function() {
+      var saved = localStorage.getItem('keel-lang') || 'zh';
+      if (saved !== 'zh') setLang(saved);
+    })();
+
+    /* ── copy install command ──────────────────────────────────────── */
+    function copyInstall() {
+      navigator.clipboard.writeText('pip install keel-runtime').then(function() {
+        var t = document.getElementById('toast');
+        t.classList.add('show');
+        setTimeout(function() { t.classList.remove('show'); }, 1800);
+      });
+    }
+
+    /* ── module accordion ──────────────────────────────────────────── */
+    document.getElementById('module-list').addEventListener('click', function(e) {
+      var row = e.target.closest('.log-row');
+      if (!row) return;
+      var mod = row.getAttribute('data-module');
+      var panel = document.querySelector('.module-expand[data-module="' + mod + '"]');
+      if (!panel) return;
+
+      var wasOpen = row.classList.contains('is-open');
+
+      /* close all */
+      document.querySelectorAll('.log-row.is-open').forEach(function(r) { r.classList.remove('is-open'); });
+      document.querySelectorAll('.module-expand.is-open').forEach(function(p) { p.classList.remove('is-open'); });
+
+      /* toggle current */
+      if (!wasOpen) {
+        row.classList.add('is-open');
+        panel.classList.add('is-open');
+      }
+    });
+  </script>
+
+</body>
+</html>
