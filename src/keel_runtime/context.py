@@ -54,7 +54,7 @@ class ContextConfig:
         if self.keep_recent_turns < 0:
             raise ValueError("ContextConfig.keep_recent_turns cannot be negative")
         if self.compaction != "truncate":
-            raise ValueError("Only compaction='truncate' is supported in Phase 5.5.2")
+            raise ValueError("Only compaction='truncate' is supported")
 
 
 @dataclass(slots=True)

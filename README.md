@@ -112,6 +112,11 @@ async def main():
     print(result.output)    # Weather report: Tokyo: 22C, sunny
     print(memory.list_decisions(scope="quickstart")[0].title)
 
+    manager = keel.JobManager(root=".keel")
+    job_id = manager.create_agent_job(weather_agent, "What is the weather in Tokyo?")
+    async for event in manager.stream(job_id):
+        print(event.message)
+
 
 asyncio.run(main())
 ```
@@ -133,7 +138,7 @@ python examples/quickstart_agent.py
 | `ToolRegistry` / `@tool` | 装饰器定义工具,自动生成 schema,注册和执行 |
 | `parse_output` / `extract_json` | 从 LLM 文本中提取 JSON,Pydantic 校验,文本 fallback |
 | `InProcessRuntime` | 把 Python async callable 包装成 Keel job |
-| `JobManager` | 创建、运行、停止、恢复、查询 job 和 collaboration |
+| `JobManager` | 创建、运行、停止、resume/retry/replay/restore、查询 job 和 collaboration |
 | `ModelConfig` | 结构化模型配置,声明式 fallback,provider 校验 |
 | `AgentSpec` / `AgentJob` | Agent 定义,job 状态,依赖,资源限制 |
 | `stores` | 本地文件系统 + S3/MinIO 持久化 |
@@ -169,6 +174,7 @@ config = AgentLoopConfig(
     max_iterations=10,
     parse_final_output=True,       # 自动解析最终输出为 JSON
     output_model=MyPydanticModel,  # 可选:用 Pydantic 校验
+    output_mode="strict",          # 可选:校验失败时返回 failed result
     fail_on_tool_error=False,      # tool 失败时是否终止 loop
     job_id="my-agent-job",
 )
@@ -231,6 +237,15 @@ async def search_web(query: str, max_results: int = 5) -> list[dict]:
     # 你的搜索逻辑
     return [{"title": "...", "url": "..."}]
 
+@tool(
+    name="send_email",
+    side_effect=True,
+    idempotency_key="email-notification-v1",
+    timeout_seconds=10,
+)
+async def send_email(to: str, body: str) -> str:
+    return "sent"
+
 @tool(name="read_file", description="Read a file from workspace")
 def read_file(path: str) -> str:
     return open(path).read()
@@ -270,11 +285,18 @@ class Review(BaseModel):
 review = parse_output(text, model=Review)
 # Review(score=8.5, summary='Good')
 
+# 严格模式: JSON 缺失或校验失败时抛 OutputValidationError
+review = parse_output(text, model=Review, strict=True)
+
 # 只提取 JSON,不校验
 raw = extract_json(text)
 ```
 
-## InProcessRuntime
+## Advanced Runtimes
+
+`@agent` + `JobManager.create_agent_job(...)` 是主路径。需要运行外部进程、容器、Kubernetes 或声明式 worker 时,再使用 `AgentSpec` 和 runtime adapters。
+
+### InProcessRuntime
 
 把 Python async callable 包装成 Keel job,不需要起子进程:
 
@@ -296,16 +318,12 @@ async for event in manager.stream(job_id):
 ## Job 生命周期
 
 ```python
-from keel_runtime import AgentSpec, JobManager
+from keel_runtime import JobManager
 
 manager = JobManager(root=".keel")
-spec = AgentSpec(
-    name="writer",
-    system_prompt="You write concise summaries.",
-)
 
-# 创建并运行
-job_id = manager.create_job(spec, input="Summarize this repo.")
+# domain_agent 是你业务模块里的 @agent
+job_id = manager.create_agent_job(domain_agent, "Summarize this repo.")
 
 # 流式输出
 async for event in manager.stream(job_id):
@@ -318,10 +336,19 @@ status = manager.get_status(job_id)
 artifacts = manager.list_artifacts(job_id)
 
 # 停止
-manager.stop(job_id)
+await manager.stop(job_id)
 
-# 恢复中断的任务
-manager.restore_job(job_id)
+# 显式 lifecycle API
+async for event in manager.resume_restorable(job_id):
+    ...
+
+retry_id = manager.retry_failed(job_id, clean_workspace=False)
+
+async for event in manager.replay(job_id):
+    ...
+
+# 从对象存储恢复 snapshot,不是本地继续执行
+manager.restore_job_from_storage(job_id)
 
 # 导出完整记录
 manager.export_job(job_id)
@@ -413,8 +440,7 @@ manager.confirm_collaboration_step(collab_id, step3, note="approved")
 ## 开发和测试
 
 ```bash
-pytest
-ruff check .
+make check
 ```
 
 ## License

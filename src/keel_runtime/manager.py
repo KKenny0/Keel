@@ -44,7 +44,7 @@ from keel_runtime.runtime import (
 )
 from keel_runtime.security import redact_data, redact_text
 from keel_runtime.specs import AgentSpec
-from keel_runtime.stores import LocalStores
+from keel_runtime.stores import JobStores
 
 
 class JobManager:
@@ -57,7 +57,7 @@ class JobManager:
         provider_registry: ProviderRegistry | None = None,
     ) -> None:
         self.root = resolve_store_path(root)
-        self.stores = LocalStores(self.root)
+        self.stores = JobStores(self.root)
         self.runtime = runtime or PiRpcRuntime()
         self.object_storage = object_storage
         self.cleanup_policy = cleanup_policy or CleanupPolicy()
@@ -548,7 +548,7 @@ class JobManager:
         except Exception as exc:
             raise StorageSyncError(f"object storage sync failed: {exc}") from exc
 
-    def restore_job(self, job_id: str) -> AgentJob:
+    def restore_job_from_storage(self, job_id: str) -> AgentJob:
         if self.object_storage is None:
             raise StorageSyncError("object storage is not configured")
         try:
@@ -556,8 +556,7 @@ class JobManager:
         except Exception as exc:
             raise StorageSyncError(f"object storage restore failed: {exc}") from exc
 
-    def restore_job_from_storage(self, job_id: str) -> AgentJob:
-        return self.restore_job(job_id)
+    restore_job = restore_job_from_storage
 
     def cleanup_job(
         self,

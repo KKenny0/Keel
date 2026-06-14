@@ -28,7 +28,7 @@ The integration model is not "deploy a Keel service, then register agents." It's
 | `ToolRegistry` / `@tool` | Decorator-based tool definition, auto-generated schema, registration and execution | done |
 | `parse_output` / `extract_json` | JSON extraction from LLM text, Pydantic validation, text fallback | done |
 | `InProcessRuntime` | Wrap a Python async callable as a Keel job | done |
-| `JobManager` | Create, run, stop, restore, query jobs and collaborations | done |
+| `JobManager` | Create, run, stop, resume/retry/replay/restore, query jobs and collaborations | done |
 | `ModelConfig` | Structured model config, declarative fallback, provider validation | done |
 | `AgentSpec` / `AgentJob` | Agent definition, job status, dependencies, resource limits | done |
 | `stores` | Local filesystem + S3/MinIO persistence | done |
@@ -109,6 +109,11 @@ async def main():
     print(result.output)      # Weather report: Tokyo: 22C, sunny
     print(memory.list_decisions(scope="quickstart")[0].title)
 
+    manager = keel.JobManager(root=".keel")
+    job_id = manager.create_agent_job(weather_agent, "What is the weather in Tokyo?")
+    async for event in manager.stream(job_id):
+        print(event.message)
+
 
 asyncio.run(main())
 ```
@@ -147,6 +152,7 @@ config = AgentLoopConfig(
     max_iterations=10,
     parse_final_output=True,       # Auto-parse final output as JSON
     output_model=MyPydanticModel,  # Optional: validate with Pydantic
+    output_mode="strict",          # Optional: fail on invalid typed output
     fail_on_tool_error=False,      # Whether to abort on tool failure
     job_id="my-agent-job",
 )
@@ -209,6 +215,15 @@ async def search_web(query: str, max_results: int = 5) -> list[dict]:
     # Your search logic
     return [{"title": "...", "url": "..."}]
 
+@tool(
+    name="send_email",
+    side_effect=True,
+    idempotency_key="email-notification-v1",
+    timeout_seconds=10,
+)
+async def send_email(to: str, body: str) -> str:
+    return "sent"
+
 @tool(name="read_file", description="Read a file from workspace")
 def read_file(path: str) -> str:
     return open(path).read()
@@ -248,11 +263,18 @@ class Review(BaseModel):
 review = parse_output(text, model=Review)
 # Review(score=8.5, summary='Good')
 
+# Strict mode: missing JSON or validation failure raises OutputValidationError
+review = parse_output(text, model=Review, strict=True)
+
 # Extract JSON only, no validation
 raw = extract_json(text)
 ```
 
-## InProcessRuntime
+## Advanced Runtimes
+
+`@agent` plus `JobManager.create_agent_job(...)` is the main embedded-agent path. Use `AgentSpec` and runtime adapters when you need external processes, containers, Kubernetes, or declarative workers.
+
+### InProcessRuntime
 
 Wrap a Python async callable as a Keel job, no subprocess required:
 
@@ -274,16 +296,12 @@ async for event in manager.stream(job_id):
 ## Job Lifecycle
 
 ```python
-from keel_runtime import AgentSpec, JobManager
+from keel_runtime import JobManager
 
 manager = JobManager(root=".keel")
-spec = AgentSpec(
-    name="writer",
-    system_prompt="You write concise summaries.",
-)
 
-# Create and run
-job_id = manager.create_job(spec, input="Summarize this repo.")
+# domain_agent is the @agent wrapper from your domain module.
+job_id = manager.create_agent_job(domain_agent, "Summarize this repo.")
 
 # Stream output
 async for event in manager.stream(job_id):
@@ -296,10 +314,19 @@ status = manager.get_status(job_id)
 artifacts = manager.list_artifacts(job_id)
 
 # Stop
-manager.stop(job_id)
+await manager.stop(job_id)
 
-# Restore an interrupted job
-manager.restore_job(job_id)
+# Explicit lifecycle APIs
+async for event in manager.resume_restorable(job_id):
+    ...
+
+retry_id = manager.retry_failed(job_id, clean_workspace=False)
+
+async for event in manager.replay(job_id):
+    ...
+
+# Restore a snapshot from object storage; this is not local continuation
+manager.restore_job_from_storage(job_id)
 
 # Export full record
 manager.export_job(job_id)
@@ -437,32 +464,21 @@ pip install -e ".[s3]"
 ## Development & Testing
 
 ```bash
-pytest
-ruff check .
+make check
 ```
 
 ## Status
 
-**Phase 1-5 complete.** Phase 5.5 in progress.
+**Recommended direction phases 1-6 are implemented in this branch.**
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 | Local single-agent MVP | done |
-| 2 | Persistence and recovery | done |
-| 3 | Production runtime boundaries (process / Docker / K8s) | done |
-| 4 | Task interface and light orchestration | done |
-| 4.1 | Model API configuration layer | done |
-| 5 | Multi-agent collaboration | done |
-| 5.5.1 | InProcessRuntime | done |
-| 5.5.2 | ContextProvider | done |
-| 5.5.3 | Tool protocol + structured output | done |
-| 5.5.4 | Agent Loop MVP | done |
-| 5.5.5 | PromptComposer | done |
-| 5.5.6 | Human Gate | done |
-| 5.5.7 | MemoryProvider | done |
-| 5.5.8 | Reference project validation + quickstart | in progress: quickstart API done |
-
-Next up: validate the reference integrations with script-weaver and open-omnisearch, then confirm the real integration boundary for the minimal API.
+| 1 | Contracts and serialization | done |
+| 2 | Checkpoint-aware AgentLoop | done |
+| 3 | AgentLoopRuntime and persisted agent jobs | done |
+| 4 | Explicit resume, retry, replay, and restore APIs | done |
+| 5 | Tool contract and strict output | done |
+| 6 | Public API, docs, and verifier cleanup | done |
 
 ## Design Principles
 

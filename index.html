@@ -726,21 +726,26 @@ runtime = <span class="cls">InProcessRuntime</span>(handler=my_agent)
             <div class="module-expand-inner">
               <div class="code-block"><span class="file-label">manager.py</span><pre><span class="kw">from</span> keel_runtime.manager <span class="kw">import</span> <span class="cls">JobManager</span>
 
-mgr = <span class="cls">JobManager</span>(store_path=<span class="str">"./keel_data"</span>)
+mgr = <span class="cls">JobManager</span>(root=<span class="str">".keel"</span>)
 
-<span class="cm"># 创建并运行</span>
-job = <span class="kw">await</span> mgr.create(spec=my_agent_spec)
-<span class="kw">await</span> mgr.start(job.id)
+<span class="cm"># 创建并运行 decorated agent</span>
+job_id = mgr.create_agent_job(research_agent, <span class="str">"vector databases"</span>)
+<span class="kw">async for</span> event <span class="kw">in</span> mgr.stream(job_id):
+    print(event.message)
 
 <span class="cm"># 查询状态</span>
-status = <span class="kw">await</span> mgr.get_status(job.id)
+status = mgr.get_status(job_id)
 
-<span class="cm"># 停止 / 恢复</span>
-<span class="kw">await</span> mgr.stop(job.id)
-<span class="kw">await</span> mgr.resume(job.id)
+<span class="cm"># 停止 / 恢复 / 重试 / 回放</span>
+<span class="kw">await</span> mgr.stop(job_id)
+<span class="kw">async for</span> event <span class="kw">in</span> mgr.resume_restorable(job_id):
+    ...
+retry_id = mgr.retry_failed(job_id)
+<span class="kw">async for</span> event <span class="kw">in</span> mgr.replay(job_id):
+    ...
 
-<span class="cm"># 导出产物</span>
-artifacts = <span class="kw">await</span> mgr.export_artifacts(job.id)</pre></div>
+<span class="cm"># 导出完整记录</span>
+record_path = mgr.export_job(job_id)</pre></div>
             </div>
           </div>
 
@@ -844,18 +849,19 @@ result = <span class="kw">await</span> collab.run()
           </article>
           <div class="module-expand" data-module="stores">
             <div class="module-expand-inner">
-              <div class="code-block"><span class="file-label">stores.py</span><pre><span class="kw">from</span> keel_runtime.stores <span class="kw">import</span> <span class="cls">LocalStore</span>
+              <div class="code-block"><span class="file-label">stores.py</span><pre><span class="kw">from</span> keel_runtime <span class="kw">import</span> <span class="cls">JobManager</span>, <span class="cls">InMemoryObjectStorage</span>
 
-store = <span class="cls">LocalStore</span>(base_path=<span class="str">"./data"</span>)
+storage = <span class="cls">InMemoryObjectStorage</span>()
+mgr = <span class="cls">JobManager</span>(root=<span class="str">".keel"</span>, object_storage=storage)
 
-<span class="cm"># 保存 Job 状态</span>
-<span class="kw">await</span> store.save_job(job)
+<span class="cm"># 查询 Job 快照</span>
+record = mgr.snapshot_job(job_id)
 
-<span class="cm"># 保存产物</span>
-<span class="kw">await</span> store.save_artifact(job_id, key=<span class="str">"report"</span>, data=report_bytes)
+<span class="cm"># 同步到对象存储</span>
+uploaded = mgr.sync_job(job_id)
 
-<span class="cm"># 查询历史</span>
-jobs = <span class="kw">await</span> store.list_jobs(status=<span class="str">"succeeded"</span>)
+<span class="cm"># 从对象存储恢复 snapshot</span>
+restored = mgr.restore_job_from_storage(job_id)
 <span class="cm"># S3/MinIO 通过 extras 按需引入</span></pre></div>
             </div>
           </div>

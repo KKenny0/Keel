@@ -18,7 +18,12 @@ from keel_runtime import (
     PiRpcRuntime,
     S3ObjectStorage,
 )
-from keel_runtime.errors import CollaborationNotFoundError, InvalidJobStateError, JobNotFoundError
+from keel_runtime.errors import (
+    CollaborationNotFoundError,
+    InvalidJobStateError,
+    JobNotFoundError,
+    StorageSyncError,
+)
 
 
 def _env_bool(name: str) -> bool:
@@ -103,6 +108,10 @@ class CreateCollaborationStepRequest(BaseModel):
 
 class ConfirmCollaborationStepRequest(BaseModel):
     note: str | None = None
+
+
+class RetryJobRequest(BaseModel):
+    clean_workspace: bool = False
 
 
 @app.post("/jobs")
@@ -243,11 +252,36 @@ async def stream_collaboration_step(
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
-@app.get("/jobs/{job_id}/resume")
-async def resume_job(job_id: str) -> StreamingResponse:
+@app.post("/jobs/{job_id}/resume-restorable")
+async def resume_restorable_job(job_id: str) -> StreamingResponse:
     async def events():
         try:
-            async for event in manager.resume(job_id):
+            async for event in manager.resume_restorable(job_id):
+                yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+        except JobNotFoundError as exc:
+            yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
+        except InvalidJobStateError as exc:
+            yield f"event: error\ndata: {json.dumps({'detail': str(exc), 'status': 409})}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.post("/jobs/{job_id}/retry")
+def retry_job(job_id: str, request: RetryJobRequest) -> dict[str, str]:
+    try:
+        retry_id = manager.retry_failed(job_id, clean_workspace=request.clean_workspace)
+        return {"job_id": retry_id}
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidJobStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/jobs/{job_id}/replay")
+async def replay_job(job_id: str) -> StreamingResponse:
+    async def events():
+        try:
+            async for event in manager.replay(job_id):
                 yield f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
         except JobNotFoundError as exc:
             yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
@@ -255,7 +289,17 @@ async def resume_job(job_id: str) -> StreamingResponse:
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
-@app.get("/collaborations/{collaboration_id}/steps/{step_id}/resume")
+@app.post("/jobs/{job_id}/restore-from-storage")
+def restore_job_from_storage(job_id: str) -> dict[str, Any]:
+    try:
+        return manager.restore_job_from_storage(job_id).to_dict()
+    except JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except StorageSyncError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/collaborations/{collaboration_id}/steps/{step_id}/resume")
 async def resume_collaboration_step(
     collaboration_id: str,
     step_id: str,

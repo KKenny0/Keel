@@ -287,7 +287,7 @@ class ArtifactStore:
         return _safe_child(self.layout.artifact_dir(job_id), relative_path)
 
 
-class LocalStores:
+class JobStores:
     def __init__(self, root: str | Path) -> None:
         self.layout = JobLayout(root)
         self.jobs = JobStateStore(self.layout)

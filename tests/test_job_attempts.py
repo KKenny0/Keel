@@ -112,7 +112,7 @@ def test_attempts_and_checkpoints_are_exported_and_restored(tmp_path: Path) -> N
     assert f"jobs/{job_id}/checkpoints/agent-loop.json" in uploaded
 
     second = JobManager(root=tmp_path / "second", object_storage=storage)
-    second.restore_job(job_id)
+    second.restore_job_from_storage(job_id)
 
     assert second.stores.attempts.load(job_id, attempt.id).to_dict() == attempt.to_dict()
     assert second.stores.checkpoints.load(job_id).to_dict() == checkpoint.to_dict()

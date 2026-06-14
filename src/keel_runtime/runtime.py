@@ -19,7 +19,7 @@ from keel_runtime.jobs import AgentJob
 from keel_runtime.loop import AgentLoop
 from keel_runtime.security import is_sensitive_key, redact_text
 from keel_runtime.specs import AgentSpec
-from keel_runtime.stores import LocalStores
+from keel_runtime.stores import JobStores
 
 AGENT_LOOP_RUNTIME = "agent-loop"
 
@@ -270,7 +270,7 @@ class AgentLoopRuntime:
     def __init__(
         self,
         agent: Agent,
-        stores: LocalStores | None = None,
+        stores: JobStores | None = None,
     ) -> None:
         self.agent = agent
         self.stores = stores
