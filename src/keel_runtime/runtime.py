@@ -283,6 +283,7 @@ class AgentLoopRuntime:
             self.agent.config,
             job_id=job.id,
             agent_name=spec.name,
+            persisted_execution=True,
         )
         loop = AgentLoop(
             self.agent.client,

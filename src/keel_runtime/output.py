@@ -47,15 +47,28 @@ class OutputValidationError(ValueError):
         )
 
 
-def parse_output(text: str, model: Any | None = None) -> Any:
+def parse_output(text: str, model: Any | None = None, *, strict: bool = False) -> Any:
     parsed = _extract_json_or_not_found(text)
     if parsed is _NOT_FOUND:
+        if strict:
+            raise OutputValidationError(
+                "No JSON output found",
+                raw_output=text,
+                code="output_json_not_found",
+                retryable=True,
+            )
         return text
     if model is None:
         return parsed
     try:
         return _validate_model(parsed, model)
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise OutputValidationError(
+                str(exc),
+                raw_output=text,
+                retryable=True,
+            ) from exc
         return text
 
 

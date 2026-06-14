@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
-from keel_runtime import OutputValidationError, parse_output
+from keel_runtime import (
+    AgentLoop,
+    AgentLoopConfig,
+    OutputValidationError,
+    PrefixStableContext,
+    ToolRegistry,
+    parse_output,
+)
 
 
 def test_output_validation_error_dict_round_trip() -> None:
@@ -40,3 +48,45 @@ def test_parse_output_fallback_behavior_is_unchanged() -> None:
 
     assert parse_output(text, model=RejectingModel) == text
     assert parse_output("plain text") == "plain text"
+
+
+def test_parse_output_strict_raises_typed_error_on_invalid_model_output() -> None:
+    class RejectingModel:
+        @classmethod
+        def model_validate(cls, data: object) -> object:
+            raise ValueError("invalid")
+
+    try:
+        parse_output('{"answer": "ok"}', model=RejectingModel, strict=True)
+    except OutputValidationError as exc:
+        assert exc.code == "output_validation_failed"
+        assert exc.raw_output == '{"answer": "ok"}'
+        assert exc.retryable is True
+    else:
+        raise AssertionError("expected OutputValidationError")
+
+
+def test_agent_loop_strict_output_returns_failed_result() -> None:
+    class FakeChatClient:
+        async def chat(self, messages, tools):
+            return {"content": '{"answer": "ok"}'}
+
+    class RejectingModel:
+        @classmethod
+        def model_validate(cls, data: object) -> object:
+            raise ValueError("invalid")
+
+    async def run_loop():
+        loop = AgentLoop(
+            FakeChatClient(),
+            PrefixStableContext(max_tokens=1_000),
+            ToolRegistry(),
+            AgentLoopConfig(output_model=RejectingModel, output_mode="strict"),
+        )
+        return await loop.run("question")
+
+    result = asyncio.run(run_loop())
+
+    assert result.status == "failed"
+    assert result.error == "invalid"
+    assert result.raw_output == '{"answer": "ok"}'

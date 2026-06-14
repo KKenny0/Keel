@@ -123,3 +123,65 @@ def test_tool_spec_rejects_varargs() -> None:
     else:
         raise AssertionError("expected ValueError")
 
+
+def test_tool_timeout_returns_structured_error() -> None:
+    @tool(name="slow", timeout_seconds=0.01)
+    async def slow() -> str:
+        await asyncio.sleep(0.05)
+        return "done"
+
+    registry = ToolRegistry([slow])
+
+    result = run(registry.execute("slow"))
+
+    assert result.ok is False
+    assert result.error == "Tool timed out after 0.01 seconds"
+    assert result.error_details is not None
+    assert result.error_details.code == "timeout"
+    assert result.error_details.retryable is True
+
+
+def test_tool_internal_timeout_error_is_not_wait_for_timeout() -> None:
+    @tool(name="upstream", timeout_seconds=10)
+    async def upstream() -> str:
+        raise TimeoutError("upstream timeout")
+
+    registry = ToolRegistry([upstream])
+
+    result = run(registry.execute("upstream"))
+
+    assert result.ok is False
+    assert result.error == "upstream timeout"
+    assert result.error_details is not None
+    assert result.error_details.code == "execution_error"
+
+
+def test_persisted_side_effect_tool_requires_idempotency_key() -> None:
+    calls = {"send": 0}
+
+    @tool(name="send_email", side_effect=True)
+    def send_email() -> str:
+        calls["send"] += 1
+        return "sent"
+
+    registry = ToolRegistry([send_email])
+
+    result = run(registry.execute("send_email", persisted=True))
+
+    assert result.ok is False
+    assert result.error_details is not None
+    assert result.error_details.code == "validation_error"
+    assert "idempotency_key" in (result.error or "")
+    assert calls["send"] == 0
+
+
+def test_persisted_side_effect_tool_with_idempotency_key_executes() -> None:
+    @tool(name="send_email", side_effect=True, idempotency_key="email-1")
+    def send_email() -> str:
+        return "sent"
+
+    registry = ToolRegistry([send_email])
+
+    result = run(registry.execute("send_email", persisted=True))
+
+    assert result == ToolResult.success("send_email", "sent")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from collections.abc import Awaitable, Callable, Iterable
@@ -10,6 +11,10 @@ from types import NoneType, UnionType
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 ToolHandler = Callable[..., Awaitable[Any] | Any]
+
+
+class _ToolTimedOut(Exception):
+    pass
 
 
 @dataclass(slots=True)
@@ -70,6 +75,15 @@ class ToolError:
             message=message,
             retryable=False,
             safe_to_retry=False,
+        )
+
+    @classmethod
+    def timeout(cls, seconds: float, *, safe_to_retry: bool) -> ToolError:
+        return cls(
+            code="timeout",
+            message=f"Tool timed out after {seconds:g} seconds",
+            retryable=True,
+            safe_to_retry=safe_to_retry,
         )
 
 
@@ -165,12 +179,19 @@ class ToolSpec:
     description: str
     parameters: dict[str, Any]
     handler: ToolHandler
+    timeout_seconds: float | None = None
+    side_effect: bool = False
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("ToolSpec.name cannot be empty")
         if not callable(self.handler):
             raise TypeError("ToolSpec.handler must be callable")
+        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
+            raise ValueError("ToolSpec.timeout_seconds must be positive")
+        if self.idempotency_key is not None and not self.idempotency_key.strip():
+            raise ValueError("ToolSpec.idempotency_key cannot be empty")
 
     @classmethod
     def from_callable(
@@ -179,6 +200,9 @@ class ToolSpec:
         *,
         name: str | None = None,
         description: str | None = None,
+        timeout_seconds: float | None = None,
+        side_effect: bool = False,
+        idempotency_key: str | None = None,
     ) -> ToolSpec:
         tool_name = name or handler.__name__
         tool_description = description if description is not None else inspect.getdoc(handler) or ""
@@ -187,25 +211,76 @@ class ToolSpec:
             description=tool_description,
             parameters=_schema_from_signature(handler),
             handler=handler,
+            timeout_seconds=timeout_seconds,
+            side_effect=side_effect,
+            idempotency_key=idempotency_key,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
         }
+        if self.timeout_seconds is not None:
+            data["timeout_seconds"] = self.timeout_seconds
+        if self.side_effect:
+            data["side_effect"] = self.side_effect
+        if self.idempotency_key is not None:
+            data["idempotency_key"] = self.idempotency_key
+        return data
 
-    async def execute(self, arguments: dict[str, Any] | None = None) -> ToolResult:
+    async def execute(
+        self,
+        arguments: dict[str, Any] | None = None,
+        *,
+        persisted: bool = False,
+    ) -> ToolResult:
+        if persisted and self.side_effect and self.idempotency_key is None:
+            return ToolResult.failure(
+                self.name,
+                ToolError.validation(
+                    "Side-effect tool requires idempotency_key for persisted execution"
+                ),
+            )
         arguments = dict(arguments or {})
         try:
             bound = _bind_and_validate(self.handler, arguments)
             result = self.handler(*bound.args, **bound.kwargs)
             if inspect.isawaitable(result):
+                if self.timeout_seconds is not None:
+                    try:
+                        result = await _await_with_timeout(result, self.timeout_seconds)
+                    except _ToolTimedOut:
+                        return self._timeout_result()
+                    return ToolResult.success(self.name, result)
                 result = await result
             return ToolResult.success(self.name, result)
+        except TypeError as exc:
+            return ToolResult.failure(self.name, ToolError.validation(str(exc)))
         except Exception as exc:
-            return ToolResult.failure(self.name, str(exc))
+            return ToolResult.failure(self.name, ToolError.execution(str(exc)))
+
+    def _timeout_result(self) -> ToolResult:
+        return ToolResult.failure(
+            self.name,
+            ToolError.timeout(
+                self.timeout_seconds or 0,
+                safe_to_retry=not self.side_effect or self.idempotency_key is not None,
+            ),
+        )
+
+
+async def _await_with_timeout(awaitable: Awaitable[Any], timeout_seconds: float) -> Any:
+    task = asyncio.ensure_future(awaitable)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=timeout_seconds)
+    except TimeoutError as exc:
+        if task.done():
+            return await task
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise _ToolTimedOut from exc
 
 
 class ToolRegistry:
@@ -232,6 +307,8 @@ class ToolRegistry:
         self,
         call: ToolCall | dict[str, Any] | str,
         arguments: dict[str, Any] | None = None,
+        *,
+        persisted: bool = False,
     ) -> ToolResult:
         tool_call = self._normalize_call(call, arguments)
         spec = self.get(tool_call.name)
@@ -241,7 +318,7 @@ class ToolRegistry:
                 f"Unknown tool: {tool_call.name}",
                 call_id=tool_call.call_id,
             )
-        result = await spec.execute(tool_call.arguments)
+        result = await spec.execute(tool_call.arguments, persisted=persisted)
         result.call_id = tool_call.call_id
         return result
 
@@ -260,9 +337,19 @@ class ToolRegistry:
 def tool(
     name: str | None = None,
     description: str | None = None,
+    timeout_seconds: float | None = None,
+    side_effect: bool = False,
+    idempotency_key: str | None = None,
 ) -> Callable[[ToolHandler], ToolHandler]:
     def decorator(handler: ToolHandler) -> ToolHandler:
-        spec = ToolSpec.from_callable(handler, name=name, description=description)
+        spec = ToolSpec.from_callable(
+            handler,
+            name=name,
+            description=description,
+            timeout_seconds=timeout_seconds,
+            side_effect=side_effect,
+            idempotency_key=idempotency_key,
+        )
         handler.__keel_tool_spec__ = spec  # type: ignore[attr-defined]
         return handler
 

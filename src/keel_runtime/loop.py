@@ -13,7 +13,7 @@ from keel_runtime.events import JobEvent, utc_now
 from keel_runtime.gate import GateDecision, HumanGate
 from keel_runtime.jobs import AgentLoopCheckpoint, AgentLoopCheckpointStatus
 from keel_runtime.memory import MemoryProvider, memory_tools
-from keel_runtime.output import parse_output
+from keel_runtime.output import OutputValidationError, parse_output
 from keel_runtime.skills import AgentContext, ComposedPrompt, PromptComposer
 from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult
 
@@ -40,7 +40,9 @@ class AgentLoopConfig:
     context_config: ContextConfig | None = None
     parse_final_output: bool = True
     output_model: Any | None = None
+    output_mode: str = "fallback"
     fail_on_tool_error: bool = False
+    persisted_execution: bool = False
     job_id: str = "agent-loop"
     prompt_composer: PromptComposer | None = None
     human_gate: HumanGate | None = None
@@ -62,6 +64,8 @@ class AgentLoopConfig:
             raise ValueError("AgentLoopConfig.memory_scope cannot be empty")
         if not self.agent_name.strip():
             raise ValueError("AgentLoopConfig.agent_name cannot be empty")
+        if self.output_mode not in {"fallback", "strict"}:
+            raise ValueError("AgentLoopConfig.output_mode must be 'fallback' or 'strict'")
 
 
 @dataclass(slots=True)
@@ -306,11 +310,52 @@ class AgentLoop:
 
             raw_output = _content_to_text(response.content)
             active_messages.append(Message(role="assistant", content=raw_output))
-            output = (
-                parse_output(raw_output, self.config.output_model)
-                if self.config.parse_final_output
-                else raw_output
-            )
+            try:
+                output = (
+                    parse_output(
+                        raw_output,
+                        self.config.output_model,
+                        strict=self.config.output_mode == "strict",
+                    )
+                    if self.config.parse_final_output
+                    else raw_output
+                )
+            except OutputValidationError as exc:
+                events.append(
+                    JobEvent.error(
+                        self.config.job_id,
+                        exc.message,
+                        status="output_validation_failed",
+                        error=exc.to_dict(),
+                    )
+                )
+                await self._save_checkpoint(
+                    checkpoint_sink,
+                    attempt_id=attempt_id,
+                    iteration=iteration,
+                    status=AgentLoopCheckpointStatus.FAILED,
+                    history_messages=history_messages,
+                    active_messages=active_messages,
+                    pending_tool_calls=[],
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                    raw_output=raw_output,
+                    parse_error=exc.to_dict(),
+                )
+                return AgentLoopResult(
+                    status="failed",
+                    raw_output=raw_output,
+                    error=exc.message,
+                    iterations=iteration,
+                    messages=[*history_messages, *active_messages],
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                    events=events,
+                )
             events.append(JobEvent.output(self.config.job_id, raw_output))
             events.append(self._event("agent loop completed", status="succeeded"))
             await self._save_checkpoint(
@@ -408,7 +453,10 @@ class AgentLoop:
                     call_id=call.call_id,
                 )
             )
-            result = await self.tools.execute(call)
+            result = await self.tools.execute(
+                call,
+                persisted=self.config.persisted_execution,
+            )
             tool_results.append(result)
             events.extend(self._drain_gate_events())
             active_messages.append(
