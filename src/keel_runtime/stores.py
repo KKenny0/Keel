@@ -12,7 +12,7 @@ from typing import Any
 from keel_runtime.collaboration import Collaboration
 from keel_runtime.errors import CollaborationNotFoundError, InvalidJobStateError, JobNotFoundError
 from keel_runtime.events import JobEvent
-from keel_runtime.jobs import AgentJob, ArtifactInput
+from keel_runtime.jobs import AgentJob, AgentLoopCheckpoint, ArtifactInput, JobAttempt
 from keel_runtime.object_storage import ObjectStorage
 
 
@@ -75,6 +75,18 @@ class JobLayout:
     def session_file(self, job_id: str) -> Path:
         return self.session_dir(job_id) / "events.jsonl"
 
+    def attempts_dir(self, job_id: str) -> Path:
+        return self.job_dir(job_id) / "attempts"
+
+    def attempt_file(self, job_id: str, attempt_id: str) -> Path:
+        return self.attempts_dir(job_id) / f"{attempt_id}.json"
+
+    def checkpoints_dir(self, job_id: str) -> Path:
+        return self.job_dir(job_id) / "checkpoints"
+
+    def agent_loop_checkpoint_file(self, job_id: str) -> Path:
+        return self.checkpoints_dir(job_id) / "agent-loop.json"
+
     def workspace_dir(self, job_id: str) -> Path:
         return self.job_dir(job_id) / "workspace"
 
@@ -92,6 +104,8 @@ class JobLayout:
 
     def ensure_job_dirs(self, job_id: str) -> None:
         self.session_dir(job_id).mkdir(parents=True, exist_ok=True)
+        self.attempts_dir(job_id).mkdir(parents=True, exist_ok=True)
+        self.checkpoints_dir(job_id).mkdir(parents=True, exist_ok=True)
         self.workspace_dir(job_id).mkdir(parents=True, exist_ok=True)
         self.artifact_dir(job_id).mkdir(parents=True, exist_ok=True)
 
@@ -160,6 +174,49 @@ class SessionStore:
         return events
 
 
+class JobAttemptStore:
+    def __init__(self, layout: JobLayout) -> None:
+        self.layout = layout
+
+    def save(self, attempt: JobAttempt) -> None:
+        _write_json(
+            self.layout.attempt_file(attempt.job_id, attempt.id),
+            attempt.to_dict(),
+        )
+
+    def load(self, job_id: str, attempt_id: str) -> JobAttempt:
+        path = self.layout.attempt_file(job_id, attempt_id)
+        if not path.exists():
+            raise FileNotFoundError(f"Job attempt not found: {attempt_id}")
+        return JobAttempt.from_dict(_read_json(path))
+
+    def list(self, job_id: str) -> list[JobAttempt]:
+        attempts: list[JobAttempt] = []
+        for path in sorted(self.layout.attempts_dir(job_id).glob("*.json")):
+            attempts.append(JobAttempt.from_dict(_read_json(path)))
+        return sorted(attempts, key=lambda attempt: attempt.number)
+
+
+class AgentLoopCheckpointStore:
+    def __init__(self, layout: JobLayout) -> None:
+        self.layout = layout
+
+    def save(self, checkpoint: AgentLoopCheckpoint) -> None:
+        _write_json(
+            self.layout.agent_loop_checkpoint_file(checkpoint.job_id),
+            checkpoint.to_dict(),
+        )
+
+    def load(self, job_id: str) -> AgentLoopCheckpoint:
+        path = self.layout.agent_loop_checkpoint_file(job_id)
+        if not path.exists():
+            raise FileNotFoundError(f"Agent loop checkpoint not found: {job_id}")
+        return AgentLoopCheckpoint.from_dict(_read_json(path))
+
+    def exists(self, job_id: str) -> bool:
+        return self.layout.agent_loop_checkpoint_file(job_id).exists()
+
+
 class WorkspaceStore:
     def __init__(self, layout: JobLayout) -> None:
         self.layout = layout
@@ -226,6 +283,8 @@ class LocalStores:
         self.jobs = JobStateStore(self.layout)
         self.collaborations = CollaborationStateStore(self.layout)
         self.sessions = SessionStore(self.layout)
+        self.attempts = JobAttemptStore(self.layout)
+        self.checkpoints = AgentLoopCheckpointStore(self.layout)
         self.workspaces = WorkspaceStore(self.layout)
         self.artifacts = ArtifactStore(self.layout)
 
@@ -256,6 +315,8 @@ class LocalStores:
         return {
             "job": job.to_dict(),
             "session": [event.to_dict() for event in self.sessions.read(job_id)],
+            "attempts": [attempt.to_dict() for attempt in self.attempts.list(job_id)],
+            "checkpoints": self._checkpoint_records(job_id),
             "workspace": workspace_files,
             "artifacts": artifact_files,
         }
@@ -277,6 +338,8 @@ class LocalStores:
             session_file = self.layout.session_file(job_id)
             if session_file.exists():
                 archive.write(session_file, "session/events.jsonl")
+            self._write_tree(archive, self.layout.attempts_dir(job_id), "attempts")
+            self._write_tree(archive, self.layout.checkpoints_dir(job_id), "checkpoints")
             self._write_tree(archive, self.layout.workspace_dir(job_id), "workspace")
             self._write_tree(archive, self.layout.artifact_dir(job_id), "artifacts")
         return export_path
@@ -301,6 +364,20 @@ class LocalStores:
         session_file = self.layout.session_file(job_id)
         if session_file.exists():
             uploads.append((f"{prefix}/session/events.jsonl", session_file.read_bytes(), None))
+
+        for path in _iter_files(self.layout.attempts_dir(job_id)):
+            relative_path = str(path.relative_to(self.layout.attempts_dir(job_id))).replace(
+                "\\",
+                "/",
+            )
+            uploads.append((f"{prefix}/attempts/{relative_path}", path.read_bytes(), None))
+
+        for path in _iter_files(self.layout.checkpoints_dir(job_id)):
+            relative_path = str(path.relative_to(self.layout.checkpoints_dir(job_id))).replace(
+                "\\",
+                "/",
+            )
+            uploads.append((f"{prefix}/checkpoints/{relative_path}", path.read_bytes(), None))
 
         for path in _iter_files(self.layout.workspace_dir(job_id)):
             relative_path = str(
@@ -335,6 +412,20 @@ class LocalStores:
                 _safe_child(self.layout.job_dir(job_id), "job.json").write_bytes(data)
             elif relative_key == "session/events.jsonl":
                 _safe_child(self.layout.session_dir(job_id), "events.jsonl").write_bytes(data)
+            elif relative_key.startswith("attempts/"):
+                path = _safe_child(
+                    self.layout.attempts_dir(job_id),
+                    relative_key.removeprefix("attempts/"),
+                )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            elif relative_key.startswith("checkpoints/"):
+                path = _safe_child(
+                    self.layout.checkpoints_dir(job_id),
+                    relative_key.removeprefix("checkpoints/"),
+                )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
             elif relative_key.startswith("workspace/"):
                 path = _safe_child(
                     self.layout.workspace_dir(job_id),
@@ -406,6 +497,11 @@ class LocalStores:
                 }
             )
         return records
+
+    def _checkpoint_records(self, job_id: str) -> dict[str, Any]:
+        if not self.checkpoints.exists(job_id):
+            return {}
+        return {"agent_loop": self.checkpoints.load(job_id).to_dict()}
 
     @staticmethod
     def _write_tree(archive: zipfile.ZipFile, root: Path, archive_root: str) -> None:

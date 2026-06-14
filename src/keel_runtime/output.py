@@ -10,6 +10,43 @@ _CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECAS
 _NOT_FOUND = object()
 
 
+class OutputValidationError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_output: str,
+        code: str = "output_validation_failed",
+        retryable: bool = False,
+    ) -> None:
+        if not code.strip():
+            raise ValueError("OutputValidationError.code cannot be empty")
+        if not message.strip():
+            raise ValueError("OutputValidationError.message cannot be empty")
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.raw_output = raw_output
+        self.retryable = retryable
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "raw_output": self.raw_output,
+            "retryable": self.retryable,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OutputValidationError:
+        return cls(
+            message=str(data["message"]),
+            raw_output=str(data.get("raw_output") or ""),
+            code=str(data.get("code") or "output_validation_failed"),
+            retryable=bool(data.get("retryable", False)),
+        )
+
+
 def parse_output(text: str, model: Any | None = None) -> Any:
     parsed = _extract_json_or_not_found(text)
     if parsed is _NOT_FOUND:

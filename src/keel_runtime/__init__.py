@@ -18,13 +18,22 @@ from keel_runtime.context import (
 )
 from keel_runtime.events import EventType, JobEvent
 from keel_runtime.gate import GateDecision, GateDecisionStatus, GateRequest, HumanGate
-from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
+from keel_runtime.jobs import (
+    AgentJob,
+    AgentLoopCheckpoint,
+    AgentLoopCheckpointStatus,
+    ArtifactInput,
+    JobAttempt,
+    JobAttemptKind,
+    JobAttemptStatus,
+    JobStatus,
+)
 from keel_runtime.loop import AgentLoop, AgentLoopConfig, AgentLoopResult, ChatClient
 from keel_runtime.manager import JobManager
 from keel_runtime.memory import Decision, LocalMemoryProvider, MemoryProvider, memory_tools
 from keel_runtime.models import ModelConfig, ModelProvider, ModelUsage, ProviderRegistry
 from keel_runtime.object_storage import InMemoryObjectStorage, ObjectStorage, S3ObjectStorage
-from keel_runtime.output import extract_json, parse_output
+from keel_runtime.output import OutputValidationError, extract_json, parse_output
 from keel_runtime.runtime import (
     AgentRuntime,
     DockerRuntime,
@@ -34,12 +43,30 @@ from keel_runtime.runtime import (
 )
 from keel_runtime.skills import AgentContext, ComposedPrompt, FileSkillComposer, PromptComposer
 from keel_runtime.specs import AgentSpec, ResourceLimits
-from keel_runtime.stores import ArtifactStore, JobStateStore, SessionStore, WorkspaceStore
-from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult, ToolSpec, ensure_tool_spec, tool
+from keel_runtime.stores import (
+    AgentLoopCheckpointStore,
+    ArtifactStore,
+    JobAttemptStore,
+    JobStateStore,
+    SessionStore,
+    WorkspaceStore,
+)
+from keel_runtime.tools import (
+    ToolCall,
+    ToolError,
+    ToolRegistry,
+    ToolResult,
+    ToolSpec,
+    ensure_tool_spec,
+    tool,
+)
 
 __all__ = [
     "Agent",
     "AgentJob",
+    "AgentLoopCheckpoint",
+    "AgentLoopCheckpointStatus",
+    "AgentLoopCheckpointStore",
     "AgentRuntime",
     "AgentSpec",
     "ArtifactStore",
@@ -71,6 +98,10 @@ __all__ = [
     "JobStatus",
     "InMemoryObjectStorage",
     "InProcessRuntime",
+    "JobAttempt",
+    "JobAttemptKind",
+    "JobAttemptStatus",
+    "JobAttemptStore",
     "KubernetesPodRuntime",
     "LocalMemoryProvider",
     "MemoryProvider",
@@ -79,6 +110,7 @@ __all__ = [
     "ModelUsage",
     "Message",
     "ObjectStorage",
+    "OutputValidationError",
     "PiRpcRuntime",
     "PrefixStableContext",
     "ProviderRegistry",
@@ -88,6 +120,7 @@ __all__ = [
     "SessionStore",
     "FileSkillComposer",
     "ToolCall",
+    "ToolError",
     "ToolRegistry",
     "ToolResult",
     "ToolSpec",

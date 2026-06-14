@@ -13,6 +13,67 @@ ToolHandler = Callable[..., Awaitable[Any] | Any]
 
 
 @dataclass(slots=True)
+class ToolError:
+    code: str
+    message: str
+    retryable: bool = False
+    safe_to_retry: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.code.strip():
+            raise ValueError("ToolError.code cannot be empty")
+        if not self.message.strip():
+            raise ValueError("ToolError.message cannot be empty")
+
+    def __str__(self) -> str:
+        return self.message
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "retryable": self.retryable,
+            "safe_to_retry": self.safe_to_retry,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ToolError:
+        return cls(
+            code=str(data["code"]),
+            message=str(data["message"]),
+            retryable=bool(data.get("retryable", False)),
+            safe_to_retry=bool(data.get("safe_to_retry", False)),
+        )
+
+    @classmethod
+    def unknown_tool(cls, name: str) -> ToolError:
+        return cls(
+            code="unknown_tool",
+            message=f"Unknown tool: {name}",
+            retryable=False,
+            safe_to_retry=False,
+        )
+
+    @classmethod
+    def validation(cls, message: str) -> ToolError:
+        return cls(
+            code="validation_error",
+            message=message,
+            retryable=False,
+            safe_to_retry=False,
+        )
+
+    @classmethod
+    def execution(cls, message: str) -> ToolError:
+        return cls(
+            code="execution_error",
+            message=message,
+            retryable=False,
+            safe_to_retry=False,
+        )
+
+
+@dataclass(slots=True)
 class ToolCall:
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -45,22 +106,56 @@ class ToolResult:
     output: Any = None
     error: str | None = None
     call_id: str | None = None
+    error_details: ToolError | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "ok": self.ok,
             "output": self.output,
-            "error": self.error,
+            "error": (
+                self.error_details.to_dict()
+                if self.error_details is not None
+                else self.error
+            ),
             "call_id": self.call_id,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ToolResult:
+        error_data = data.get("error")
+        error_details = (
+            ToolError.from_dict(error_data) if isinstance(error_data, dict) else None
+        )
+        return cls(
+            name=str(data["name"]),
+            ok=bool(data["ok"]),
+            output=data.get("output"),
+            error=error_details.message if error_details is not None else error_data,
+            call_id=str(data["call_id"]) if data.get("call_id") is not None else None,
+            error_details=error_details,
+        )
 
     @classmethod
     def success(cls, name: str, output: Any, *, call_id: str | None = None) -> ToolResult:
         return cls(name=name, ok=True, output=output, call_id=call_id)
 
     @classmethod
-    def failure(cls, name: str, error: str, *, call_id: str | None = None) -> ToolResult:
+    def failure(
+        cls,
+        name: str,
+        error: str | ToolError,
+        *,
+        call_id: str | None = None,
+    ) -> ToolResult:
+        if isinstance(error, ToolError):
+            return cls(
+                name=name,
+                ok=False,
+                error=error.message,
+                call_id=call_id,
+                error_details=error,
+            )
         return cls(name=name, ok=False, error=error, call_id=call_id)
 
 
