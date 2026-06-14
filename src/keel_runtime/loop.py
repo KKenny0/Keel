@@ -4,17 +4,24 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from keel_runtime.context import ContextConfig, ContextProvider, ContextResult, Message
-from keel_runtime.events import JobEvent
+from keel_runtime.events import JobEvent, utc_now
 from keel_runtime.gate import GateDecision, HumanGate
+from keel_runtime.jobs import AgentLoopCheckpoint, AgentLoopCheckpointStatus
 from keel_runtime.memory import MemoryProvider, memory_tools
 from keel_runtime.output import parse_output
 from keel_runtime.skills import AgentContext, ComposedPrompt, PromptComposer
 from keel_runtime.tools import ToolCall, ToolRegistry, ToolResult
+
+CheckpointSink = Callable[[AgentLoopCheckpoint], Awaitable[None] | None]
+CheckpointSource = Callable[
+    [],
+    Awaitable[AgentLoopCheckpoint | None] | AgentLoopCheckpoint | None,
+]
 
 
 class ChatClient(Protocol):
@@ -42,6 +49,7 @@ class AgentLoopConfig:
     fail_on_gate_timeout: bool = True
     memory_provider: MemoryProvider | None = None
     memory_scope: str = "default"
+    agent_name: str = "agent-loop"
 
     def __post_init__(self) -> None:
         if self.max_iterations <= 0:
@@ -52,6 +60,8 @@ class AgentLoopConfig:
             raise ValueError("AgentLoopConfig.gate_tool_name cannot be empty")
         if not self.memory_scope.strip():
             raise ValueError("AgentLoopConfig.memory_scope cannot be empty")
+        if not self.agent_name.strip():
+            raise ValueError("AgentLoopConfig.agent_name cannot be empty")
 
 
 @dataclass(slots=True)
@@ -112,7 +122,12 @@ class AgentLoop:
         *,
         history: Sequence[Message | dict[str, Any]] | None = None,
         agent_context: AgentContext | dict[str, Any] | None = None,
+        attempt_id: str = "direct",
+        checkpoint_sink: CheckpointSink | None = None,
+        checkpoint_source: CheckpointSource | AgentLoopCheckpoint | None = None,
     ) -> AgentLoopResult:
+        if not attempt_id.strip():
+            raise ValueError("attempt_id cannot be empty")
         events: list[JobEvent] = []
         context_results: list[ContextResult] = []
         composed_prompts: list[ComposedPrompt] = []
@@ -121,9 +136,106 @@ class AgentLoop:
         history_messages = _normalize_message_sequence(history or [])
         active_messages = _normalize_loop_input(input)
         base_agent_context = _normalize_agent_context(agent_context, active_messages)
+        pending_tool_calls: list[ToolCall] = []
+        start_iteration = 1
+
+        checkpoint = await self._load_checkpoint(checkpoint_source)
+        if checkpoint is not None:
+            self._validate_checkpoint(checkpoint)
+            history_messages = [
+                Message.from_dict(item) for item in checkpoint.history_messages
+            ]
+            active_messages = [
+                Message.from_dict(item) for item in checkpoint.active_messages
+            ]
+            context_results = [
+                _context_result_from_dict(item) for item in checkpoint.context_results
+            ]
+            composed_prompts = [
+                _composed_prompt_from_dict(item) for item in checkpoint.composed_prompts
+            ]
+            tool_results = [
+                ToolResult.from_dict(item) for item in checkpoint.completed_tool_results
+            ]
+            gate_decisions = [
+                GateDecision.from_dict(item) for item in checkpoint.gate_decisions
+            ]
+            pending_tool_calls = [
+                ToolCall.from_dict(item) for item in checkpoint.pending_tool_calls
+            ]
+            base_agent_context = _normalize_agent_context(agent_context, active_messages)
+            start_iteration = checkpoint.iteration + 1
+            events.append(
+                self._event(
+                    "agent loop resumed from checkpoint",
+                    iteration=checkpoint.iteration,
+                    checkpoint_status=checkpoint.status.value,
+                )
+            )
+            if checkpoint.status == AgentLoopCheckpointStatus.COMPLETED:
+                return AgentLoopResult(
+                    status="succeeded",
+                    output=checkpoint.parsed_output,
+                    raw_output=checkpoint.raw_output,
+                    iterations=checkpoint.iteration,
+                    messages=[*history_messages, *active_messages],
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                    events=events,
+                )
+            if checkpoint.status == AgentLoopCheckpointStatus.FAILED:
+                error = (
+                    str(checkpoint.parse_error.get("message"))
+                    if checkpoint.parse_error and checkpoint.parse_error.get("message")
+                    else "agent loop checkpoint failed"
+                )
+                return AgentLoopResult(
+                    status="failed",
+                    error=error,
+                    iterations=checkpoint.iteration,
+                    messages=[*history_messages, *active_messages],
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                    events=events,
+                )
 
         events.append(self._event("agent loop started", status="running"))
-        for iteration in range(1, self.config.max_iterations + 1):
+        await self._save_checkpoint(
+            checkpoint_sink,
+            attempt_id=attempt_id,
+            iteration=max(start_iteration - 1, 0),
+            status=AgentLoopCheckpointStatus.RUNNING,
+            history_messages=history_messages,
+            active_messages=active_messages,
+            pending_tool_calls=pending_tool_calls,
+            context_results=context_results,
+            composed_prompts=composed_prompts,
+            tool_results=tool_results,
+            gate_decisions=gate_decisions,
+        )
+
+        if pending_tool_calls:
+            terminal_result = await self._execute_tool_calls(
+                pending_tool_calls,
+                iteration=max(start_iteration - 1, 0),
+                history_messages=history_messages,
+                active_messages=active_messages,
+                context_results=context_results,
+                composed_prompts=composed_prompts,
+                tool_results=tool_results,
+                gate_decisions=gate_decisions,
+                events=events,
+                checkpoint_sink=checkpoint_sink,
+                attempt_id=attempt_id,
+            )
+            if terminal_result is not None:
+                return terminal_result
+
+        for iteration in range(start_iteration, self.config.max_iterations + 1):
             system_prompt, composed_prompt = await self._compose_system_prompt(
                 base_agent_context,
                 history_messages,
@@ -162,74 +274,34 @@ class AgentLoop:
                         },
                     )
                 )
-                for call in response.tool_calls:
-                    events.append(
-                        self._event(
-                            "tool call started",
-                            tool_name=call.name,
-                            call_id=call.call_id,
-                        )
-                    )
-                    result = await self.tools.execute(call)
-                    tool_results.append(result)
-                    events.extend(self._drain_gate_events())
-                    active_messages.append(
-                        Message(
-                            role="tool",
-                            content=result.to_dict(),
-                            name=result.name,
-                            metadata={
-                                "tool_result": True,
-                                "tool_call_id": result.call_id,
-                            },
-                        )
-                    )
-                    gate_decision = self._gate_decision(call, result)
-                    if gate_decision is not None:
-                        gate_decisions.append(gate_decision)
-                        gated_result = self._gate_terminal_result(
-                            gate_decision,
-                            iteration,
-                            history_messages,
-                            active_messages,
-                            context_results,
-                            composed_prompts,
-                            tool_results,
-                            gate_decisions,
-                            events,
-                        )
-                        if gated_result is not None:
-                            return gated_result
-                    if result.ok:
-                        events.append(
-                            self._event(
-                                "tool call completed",
-                                tool_name=result.name,
-                                call_id=result.call_id,
-                            )
-                        )
-                    else:
-                        events.append(
-                            JobEvent.error(
-                                self.config.job_id,
-                                "tool call failed",
-                                tool_name=result.name,
-                                call_id=result.call_id,
-                                error=result.error,
-                            )
-                        )
-                        if self.config.fail_on_tool_error:
-                            return AgentLoopResult(
-                                status="failed",
-                                error=result.error,
-                                iterations=iteration,
-                                messages=[*history_messages, *active_messages],
-                                context_results=context_results,
-                                composed_prompts=composed_prompts,
-                                tool_results=tool_results,
-                                gate_decisions=gate_decisions,
-                                events=events,
-                            )
+                await self._save_checkpoint(
+                    checkpoint_sink,
+                    attempt_id=attempt_id,
+                    iteration=iteration,
+                    status=AgentLoopCheckpointStatus.AWAITING_TOOL,
+                    history_messages=history_messages,
+                    active_messages=active_messages,
+                    pending_tool_calls=response.tool_calls,
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                )
+                terminal_result = await self._execute_tool_calls(
+                    response.tool_calls,
+                    iteration=iteration,
+                    history_messages=history_messages,
+                    active_messages=active_messages,
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                    events=events,
+                    checkpoint_sink=checkpoint_sink,
+                    attempt_id=attempt_id,
+                )
+                if terminal_result is not None:
+                    return terminal_result
                 continue
 
             raw_output = _content_to_text(response.content)
@@ -241,6 +313,21 @@ class AgentLoop:
             )
             events.append(JobEvent.output(self.config.job_id, raw_output))
             events.append(self._event("agent loop completed", status="succeeded"))
+            await self._save_checkpoint(
+                checkpoint_sink,
+                attempt_id=attempt_id,
+                iteration=iteration,
+                status=AgentLoopCheckpointStatus.COMPLETED,
+                history_messages=history_messages,
+                active_messages=active_messages,
+                pending_tool_calls=[],
+                context_results=context_results,
+                composed_prompts=composed_prompts,
+                tool_results=tool_results,
+                gate_decisions=gate_decisions,
+                raw_output=raw_output,
+                parsed_output=output,
+            )
             return AgentLoopResult(
                 status="succeeded",
                 output=output,
@@ -256,6 +343,20 @@ class AgentLoop:
 
         error = f"Maximum iterations reached: {self.config.max_iterations}"
         events.append(JobEvent.error(self.config.job_id, error, status="max_iterations"))
+        await self._save_checkpoint(
+            checkpoint_sink,
+            attempt_id=attempt_id,
+            iteration=self.config.max_iterations,
+            status=AgentLoopCheckpointStatus.FAILED,
+            history_messages=history_messages,
+            active_messages=active_messages,
+            pending_tool_calls=[],
+            context_results=context_results,
+            composed_prompts=composed_prompts,
+            tool_results=tool_results,
+            gate_decisions=gate_decisions,
+            parse_error={"code": "max_iterations", "message": error},
+        )
         return AgentLoopResult(
             status="max_iterations",
             error=error,
@@ -281,6 +382,215 @@ class AgentLoop:
         if self.config.human_gate is None:
             return []
         return self.config.human_gate.drain_events()
+
+    async def _execute_tool_calls(
+        self,
+        calls: Sequence[ToolCall],
+        *,
+        iteration: int,
+        history_messages: Sequence[Message],
+        active_messages: list[Message],
+        context_results: list[ContextResult],
+        composed_prompts: list[ComposedPrompt],
+        tool_results: list[ToolResult],
+        gate_decisions: list[GateDecision],
+        events: list[JobEvent],
+        checkpoint_sink: CheckpointSink | None,
+        attempt_id: str,
+    ) -> AgentLoopResult | None:
+        pending = list(calls)
+        while pending:
+            call = pending.pop(0)
+            events.append(
+                self._event(
+                    "tool call started",
+                    tool_name=call.name,
+                    call_id=call.call_id,
+                )
+            )
+            result = await self.tools.execute(call)
+            tool_results.append(result)
+            events.extend(self._drain_gate_events())
+            active_messages.append(
+                Message(
+                    role="tool",
+                    content=result.to_dict(),
+                    name=result.name,
+                    metadata={
+                        "tool_result": True,
+                        "tool_call_id": result.call_id,
+                    },
+                )
+            )
+            gate_decision = self._gate_decision(call, result)
+            if gate_decision is not None:
+                gate_decisions.append(gate_decision)
+
+            await self._save_checkpoint(
+                checkpoint_sink,
+                attempt_id=attempt_id,
+                iteration=iteration,
+                status=(
+                    AgentLoopCheckpointStatus.AWAITING_TOOL
+                    if pending
+                    else AgentLoopCheckpointStatus.RUNNING
+                ),
+                history_messages=history_messages,
+                active_messages=active_messages,
+                pending_tool_calls=pending,
+                context_results=context_results,
+                composed_prompts=composed_prompts,
+                tool_results=tool_results,
+                gate_decisions=gate_decisions,
+            )
+
+            if gate_decision is not None:
+                gated_result = self._gate_terminal_result(
+                    gate_decision,
+                    iteration,
+                    history_messages,
+                    active_messages,
+                    context_results,
+                    composed_prompts,
+                    tool_results,
+                    gate_decisions,
+                    events,
+                )
+                if gated_result is not None:
+                    await self._save_checkpoint(
+                        checkpoint_sink,
+                        attempt_id=attempt_id,
+                        iteration=iteration,
+                        status=AgentLoopCheckpointStatus.FAILED,
+                        history_messages=history_messages,
+                        active_messages=active_messages,
+                        pending_tool_calls=pending,
+                        context_results=context_results,
+                        composed_prompts=composed_prompts,
+                        tool_results=tool_results,
+                        gate_decisions=gate_decisions,
+                        parse_error={
+                            "code": gated_result.status,
+                            "message": gated_result.error or gated_result.status,
+                        },
+                    )
+                    return gated_result
+
+            if result.ok:
+                events.append(
+                    self._event(
+                        "tool call completed",
+                        tool_name=result.name,
+                        call_id=result.call_id,
+                    )
+                )
+                continue
+
+            events.append(
+                JobEvent.error(
+                    self.config.job_id,
+                    "tool call failed",
+                    tool_name=result.name,
+                    call_id=result.call_id,
+                    error=result.error,
+                )
+            )
+            if self.config.fail_on_tool_error:
+                await self._save_checkpoint(
+                    checkpoint_sink,
+                    attempt_id=attempt_id,
+                    iteration=iteration,
+                    status=AgentLoopCheckpointStatus.FAILED,
+                    history_messages=history_messages,
+                    active_messages=active_messages,
+                    pending_tool_calls=pending,
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                    parse_error={
+                        "code": "tool_error",
+                        "message": result.error or "tool call failed",
+                    },
+                )
+                return AgentLoopResult(
+                    status="failed",
+                    error=result.error,
+                    iterations=iteration,
+                    messages=[*history_messages, *active_messages],
+                    context_results=context_results,
+                    composed_prompts=composed_prompts,
+                    tool_results=tool_results,
+                    gate_decisions=gate_decisions,
+                    events=events,
+                )
+        return None
+
+    async def _load_checkpoint(
+        self,
+        checkpoint_source: CheckpointSource | AgentLoopCheckpoint | None,
+    ) -> AgentLoopCheckpoint | None:
+        if checkpoint_source is None:
+            return None
+        if isinstance(checkpoint_source, AgentLoopCheckpoint):
+            return checkpoint_source
+        checkpoint = checkpoint_source()
+        if inspect.isawaitable(checkpoint):
+            checkpoint = await checkpoint
+        return checkpoint
+
+    async def _save_checkpoint(
+        self,
+        checkpoint_sink: CheckpointSink | None,
+        *,
+        attempt_id: str,
+        iteration: int,
+        status: AgentLoopCheckpointStatus,
+        history_messages: Sequence[Message],
+        active_messages: Sequence[Message],
+        pending_tool_calls: Sequence[ToolCall],
+        context_results: Sequence[ContextResult],
+        composed_prompts: Sequence[ComposedPrompt],
+        tool_results: Sequence[ToolResult],
+        gate_decisions: Sequence[GateDecision],
+        raw_output: str | None = None,
+        parsed_output: Any = None,
+        parse_error: dict[str, Any] | None = None,
+    ) -> None:
+        if checkpoint_sink is None:
+            return
+        now = utc_now()
+        checkpoint = AgentLoopCheckpoint(
+            version=1,
+            job_id=self.config.job_id,
+            attempt_id=attempt_id,
+            agent_name=self.config.agent_name,
+            iteration=iteration,
+            status=status,
+            history_messages=[message.to_dict() for message in history_messages],
+            active_messages=[message.to_dict() for message in active_messages],
+            pending_tool_calls=[call.to_dict() for call in pending_tool_calls],
+            completed_tool_results=[result.to_dict() for result in tool_results],
+            context_results=[
+                _context_result_to_dict(result) for result in context_results
+            ],
+            composed_prompts=[
+                _composed_prompt_to_dict(prompt) for prompt in composed_prompts
+            ],
+            gate_decisions=[decision.to_dict() for decision in gate_decisions],
+            raw_output=raw_output,
+            parsed_output=parsed_output,
+            parse_error=parse_error,
+            created_at=now,
+            updated_at=now,
+        )
+        result = checkpoint_sink(checkpoint)
+        if inspect.isawaitable(result):
+            await result
+
+    def _validate_checkpoint(self, checkpoint: AgentLoopCheckpoint) -> None:
+        if checkpoint.job_id != self.config.job_id:
+            raise ValueError("checkpoint job_id does not match AgentLoopConfig.job_id")
 
     def _gate_decision(
         self,
@@ -478,3 +788,51 @@ def _gate_decision_from_output(output: Any) -> GateDecision | None:
         return GateDecision.from_dict(output)
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _context_result_to_dict(result: ContextResult) -> dict[str, Any]:
+    return {
+        "messages": [message.to_dict() for message in result.messages],
+        "tokens_used": result.tokens_used,
+        "cache_breakpoints": list(result.cache_breakpoints),
+        "trimmed_count": result.trimmed_count,
+        "compaction_applied": result.compaction_applied,
+        "consumed_count": result.consumed_count,
+    }
+
+
+def _context_result_from_dict(data: dict[str, Any]) -> ContextResult:
+    return ContextResult(
+        messages=[Message.from_dict(item) for item in data.get("messages") or []],
+        tokens_used=int(data.get("tokens_used") or 0),
+        cache_breakpoints=list(data.get("cache_breakpoints") or []),
+        trimmed_count=int(data.get("trimmed_count") or 0),
+        compaction_applied=(
+            str(data["compaction_applied"])
+            if data.get("compaction_applied") is not None
+            else None
+        ),
+        consumed_count=int(data.get("consumed_count") or 0),
+    )
+
+
+def _composed_prompt_to_dict(prompt: ComposedPrompt) -> dict[str, Any]:
+    return {
+        "content": prompt.content,
+        "skill_names": list(prompt.skill_names),
+        "constraints": list(prompt.constraints),
+        "examples": list(prompt.examples),
+        "schema_overrides": dict(prompt.schema_overrides),
+        "metadata": dict(prompt.metadata),
+    }
+
+
+def _composed_prompt_from_dict(data: dict[str, Any]) -> ComposedPrompt:
+    return ComposedPrompt(
+        content=str(data.get("content") or ""),
+        skill_names=[str(item) for item in data.get("skill_names") or []],
+        constraints=[str(item) for item in data.get("constraints") or []],
+        examples=list(data.get("examples") or []),
+        schema_overrides=dict(data.get("schema_overrides") or {}),
+        metadata=dict(data.get("metadata") or {}),
+    )
