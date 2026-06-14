@@ -7,9 +7,12 @@ from collections.abc import AsyncIterator
 from io import BytesIO
 from pathlib import Path
 
+import pytest
+
 from keel_runtime import (
     AgentSpec,
     InMemoryObjectStorage,
+    JobAttemptKind,
     JobEvent,
     JobManager,
     JobStatus,
@@ -65,6 +68,18 @@ class FailingObjectStorage:
         return []
 
 
+class CountingRuntime:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run(self, job, spec) -> AsyncIterator[JobEvent]:
+        self.calls += 1
+        yield JobEvent.output(job.id, f"count:{self.calls}")
+
+    async def stop(self, job_id: str) -> None:
+        return None
+
+
 def test_resume_failed_job_preserves_workspace(tmp_path: Path) -> None:
     runtime = FailThenRecoverRuntime()
     manager = JobManager(root=tmp_path, runtime=runtime)
@@ -73,13 +88,47 @@ def test_resume_failed_job_preserves_workspace(tmp_path: Path) -> None:
     collect(manager.stream(job_id))
     assert manager.get_status(job_id) == JobStatus.FAILED
 
-    events = collect(manager.resume(job_id))
+    with pytest.warns(DeprecationWarning):
+        events = collect(manager.resume(job_id))
 
     assert manager.get_status(job_id) == JobStatus.SUCCEEDED
     assert any(event.message == "job resumed" for event in manager.read_session(job_id))
     assert any(event.message == "recovered" for event in events)
     marker = Path(manager.get_job(job_id).workspace_path) / "resume-marker.txt"
     assert marker.read_text(encoding="utf-8") == "call:1\ncall:2\n"
+
+
+def test_retry_failed_creates_new_job_and_retry_attempt(tmp_path: Path) -> None:
+    runtime = FailThenRecoverRuntime()
+    manager = JobManager(root=tmp_path, runtime=runtime)
+    job_id = manager.create_job(AgentSpec(name="recover"), {"message": "retry"})
+    collect(manager.stream(job_id))
+    assert manager.get_status(job_id) == JobStatus.FAILED
+
+    retry_id = manager.retry_failed(job_id)
+    retry_attempt = manager.stores.attempts.load(retry_id, "attempt-1")
+    events = collect(manager.stream(retry_id))
+
+    assert retry_id != job_id
+    assert retry_attempt.kind == JobAttemptKind.RETRY
+    assert retry_attempt.retry_of == job_id
+    assert manager.get_status(retry_id) == JobStatus.SUCCEEDED
+    assert any(event.message == "recovered" for event in events)
+    marker = Path(manager.get_job(retry_id).workspace_path) / "resume-marker.txt"
+    assert marker.read_text(encoding="utf-8") == "call:1\ncall:2\n"
+
+
+def test_replay_reads_stored_session_without_running_again(tmp_path: Path) -> None:
+    runtime = CountingRuntime()
+    manager = JobManager(root=tmp_path, runtime=runtime)
+    job_id = manager.create_job(AgentSpec(name="counter"), {"message": "replay"})
+    collect(manager.stream(job_id))
+
+    events = collect(manager.replay(job_id))
+
+    assert runtime.calls == 1
+    assert any(event.message == "count:1" for event in events)
+    assert manager.get_status(job_id) == JobStatus.SUCCEEDED
 
 
 def test_export_job_contains_record_session_workspace_and_artifacts(tmp_path: Path) -> None:
@@ -144,7 +193,7 @@ def test_restore_job_from_object_storage_to_new_root(tmp_path: Path) -> None:
     collect(first.stream(job_id))
 
     second = JobManager(root=second_root, runtime=WorkspaceRuntime(), object_storage=storage)
-    restored = second.restore_job(job_id)
+    restored = second.restore_job_from_storage(job_id)
 
     assert restored.id == job_id
     assert second.get_status(job_id) == JobStatus.SUCCEEDED

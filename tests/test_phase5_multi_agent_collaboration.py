@@ -12,6 +12,7 @@ from keel_runtime import (
     CollaborationStatus,
     CollaborationStepStatus,
     EventType,
+    JobAttemptKind,
     JobEvent,
     JobManager,
     JobStatus,
@@ -227,6 +228,9 @@ def test_failed_collaboration_step_can_retry_from_clean_project_workspace(
     description = manager.describe_collaboration(collaboration_id)
     assert retry_job_id != failed_job_id
     assert manager.get_status(retry_job_id) == JobStatus.SUCCEEDED
+    retry_attempt = manager.stores.attempts.load(retry_job_id, "attempt-1")
+    assert retry_attempt.kind == JobAttemptKind.RETRY
+    assert retry_attempt.retry_of == failed_job_id
     assert step.job_ids == [failed_job_id, retry_job_id]
     assert step.status == CollaborationStepStatus.SUCCEEDED
     assert [attempt["status"] for attempt in description["steps"][0]["attempts"]] == [
@@ -258,7 +262,8 @@ def test_restorable_collaboration_step_survives_restart_and_resumes(tmp_path: Pa
     assert collaboration.status == CollaborationStatus.RESTORABLE
     assert collaboration.steps[0].status == CollaborationStepStatus.RESTORABLE
 
-    events = collect(second.resume_collaboration_step(collaboration_id, step_id))
+    with pytest.warns(DeprecationWarning):
+        events = collect(second.resume_collaboration_step(collaboration_id, step_id))
 
     assert second.get_status(job_id) == JobStatus.SUCCEEDED
     assert second.get_collaboration(collaboration_id).status == CollaborationStatus.SUCCEEDED

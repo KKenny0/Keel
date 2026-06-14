@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+import warnings
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,14 @@ from keel_runtime.errors import (
     StorageSyncError,
 )
 from keel_runtime.events import EventType, JobEvent, utc_now
-from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
+from keel_runtime.jobs import (
+    AgentJob,
+    ArtifactInput,
+    JobAttempt,
+    JobAttemptKind,
+    JobAttemptStatus,
+    JobStatus,
+)
 from keel_runtime.models import ModelConfig, ProviderRegistry, parse_model_usage
 from keel_runtime.object_storage import ObjectStorage
 from keel_runtime.runtime import (
@@ -96,6 +104,7 @@ class JobManager:
             artifact_inputs=normalized_artifact_inputs,
         )
         self.stores.jobs.save(job)
+        self._create_initial_attempt(job_id)
         self._append_event(JobEvent.status(job_id, "job created", status=JobStatus.CREATED.value))
         self._record_model_config_warnings(job_id, spec)
         return job_id
@@ -335,6 +344,7 @@ class JobManager:
                 f"Collaboration step reached max attempts: {step.max_attempts}"
             )
         job_id = self._create_collaboration_job(collaboration, step)
+        self._mark_retry_attempt(job_id, retry_of=latest_job_id)
         step.job_ids.append(job_id)
         step.with_status(CollaborationStepStatus.CREATED)
         self._append_event(
@@ -372,6 +382,12 @@ class JobManager:
             yield event
 
     async def resume(self, job_id: str) -> AsyncIterator[JobEvent]:
+        warnings.warn(
+            "JobManager.resume() is deprecated; use resume_restorable(), "
+            "retry_failed(), or replay() for explicit intent.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         job = self.stores.jobs.load(job_id)
         if job.status == JobStatus.SUCCEEDED:
             for event in self.stores.sessions.read(job_id):
@@ -381,6 +397,67 @@ class JobManager:
         self.stores.jobs.save(job)
         self._append_event(JobEvent.status(job_id, "job resumed", status=JobStatus.CREATED.value))
         async for event in self.stream(job_id):
+            yield event
+
+    async def resume_restorable(self, job_id: str) -> AsyncIterator[JobEvent]:
+        job = self.stores.jobs.load(job_id)
+        if job.status != JobStatus.RESTORABLE:
+            raise InvalidJobStateError(
+                f"Job is {job.status.value}; resume_restorable requires restorable"
+            )
+        if not self.stores.checkpoints.exists(job_id):
+            raise InvalidJobStateError(
+                "Job has no agent loop checkpoint; use retry_failed instead"
+            )
+        if job_id not in self._job_runtimes:
+            raise InvalidJobStateError(
+                "Job runtime is not registered in this process; use retry_failed instead"
+            )
+        job.with_status(JobStatus.CREATED, error=None, exit_code=None, timed_out=False)
+        self.stores.jobs.save(job)
+        self._append_event(
+            JobEvent.status(
+                job_id,
+                "job resume_restorable requested",
+                status=JobStatus.CREATED.value,
+            )
+        )
+        async for event in self.stream(job_id):
+            yield event
+
+    def retry_failed(self, job_id: str, *, clean_workspace: bool = False) -> str:
+        job = self.stores.jobs.load(job_id)
+        retryable_statuses = {JobStatus.FAILED, JobStatus.STOPPED, JobStatus.RESTORABLE}
+        if job.status not in retryable_statuses:
+            raise InvalidJobStateError(
+                f"Job is {job.status.value}; retry_failed requires failed, stopped, or restorable"
+            )
+
+        workspace = None if clean_workspace else job.workspace_path
+        retry_id = self.create_job(
+            job.spec,
+            job.input,
+            workspace=workspace,
+            dependencies=job.dependencies,
+            artifact_inputs=job.artifact_inputs,
+        )
+        runtime = self._job_runtimes.get(job_id)
+        if isinstance(runtime, AgentLoopRuntime):
+            self._job_runtimes[retry_id] = AgentLoopRuntime(runtime.agent, self.stores)
+        self._mark_retry_attempt(retry_id, retry_of=job_id)
+        self._append_event(
+            JobEvent.status(
+                retry_id,
+                "job retry created",
+                retry_of=job_id,
+                clean_workspace=clean_workspace,
+            )
+        )
+        return retry_id
+
+    async def replay(self, job_id: str) -> AsyncIterator[JobEvent]:
+        self.stores.jobs.load(job_id)
+        for event in self.stores.sessions.read(job_id):
             yield event
 
     async def stop(self, job_id: str) -> JobStatus:
@@ -398,6 +475,7 @@ class JobManager:
         if job_id not in self._tasks:
             job.with_status(JobStatus.STOPPED)
             self.stores.jobs.save(job)
+            self._set_latest_attempt_status(job_id, JobAttemptStatus.STOPPED, ended=True)
             stopped_event = JobEvent.status(job_id, "job stopped", status=JobStatus.STOPPED.value)
             self._append_event(stopped_event)
             await self._publish(job_id, stopped_event)
@@ -405,7 +483,6 @@ class JobManager:
             self._sync_collaborations_for_job(job_id)
             self._stop_requested.discard(job_id)
             self._runtime_specs.pop(job_id, None)
-            self._job_runtimes.pop(job_id, None)
             self._secret_values.pop(job_id, None)
             return JobStatus.STOPPED
 
@@ -479,6 +556,9 @@ class JobManager:
         except Exception as exc:
             raise StorageSyncError(f"object storage restore failed: {exc}") from exc
 
+    def restore_job_from_storage(self, job_id: str) -> AgentJob:
+        return self.restore_job(job_id)
+
     def cleanup_job(
         self,
         job_id: str,
@@ -503,6 +583,7 @@ class JobManager:
             job = self.stores.jobs.load(job_id)
             job.with_status(JobStatus.RUNNING)
             self.stores.jobs.save(job)
+            self._set_latest_attempt_status(job_id, JobAttemptStatus.RUNNING)
             await self._record_and_publish(
                 JobEvent.status(job_id, "job running", status=job.status.value)
             )
@@ -530,6 +611,15 @@ class JobManager:
             job.with_status(final_status, result=result, exit_code=None, timed_out=False)
             await self._record_model_usage(job, output, scan_output=True)
             self.stores.jobs.save(job)
+            self._set_latest_attempt_status(
+                job_id,
+                (
+                    JobAttemptStatus.STOPPED
+                    if final_status == JobStatus.STOPPED
+                    else JobAttemptStatus.SUCCEEDED
+                ),
+                ended=True,
+            )
             await self._record_and_publish(
                 JobEvent.status(job_id, f"job {final_status.value}", status=final_status.value)
             )
@@ -556,6 +646,13 @@ class JobManager:
                 timed_out=timed_out,
             )
             self.stores.jobs.save(job)
+            self._set_latest_attempt_status(
+                job_id,
+                JobAttemptStatus.FAILED,
+                ended=True,
+                error=error,
+                retryable=True,
+            )
             await self._record_and_publish(
                 JobEvent.error(
                     job_id,
@@ -569,7 +666,6 @@ class JobManager:
         finally:
             self._stop_requested.discard(job_id)
             self._runtime_specs.pop(job_id, None)
-            self._job_runtimes.pop(job_id, None)
             self._secret_values.pop(job_id, None)
             self._sync_collaborations_for_job(job_id)
             await self._finish_queue(job_id)
@@ -578,6 +674,48 @@ class JobManager:
 
     def _runtime_for_job(self, job_id: str) -> AgentRuntime:
         return self._job_runtimes.get(job_id, self.runtime)
+
+    def _create_initial_attempt(self, job_id: str) -> None:
+        now = utc_now()
+        self.stores.attempts.save(
+            JobAttempt(
+                id="attempt-1",
+                job_id=job_id,
+                number=1,
+                kind=JobAttemptKind.INITIAL,
+                status=JobAttemptStatus.CREATED,
+                started_at=now,
+            )
+        )
+
+    def _set_latest_attempt_status(
+        self,
+        job_id: str,
+        status: JobAttemptStatus,
+        *,
+        ended: bool = False,
+        error: str | None = None,
+        retryable: bool | None = None,
+    ) -> None:
+        attempts = self.stores.attempts.list(job_id)
+        if not attempts or attempts[-1].id == "legacy":
+            self._create_initial_attempt(job_id)
+            attempts = self.stores.attempts.list(job_id)
+        attempt = attempts[-1]
+        attempt.status = status
+        if ended:
+            attempt.ended_at = utc_now()
+        if error is not None:
+            attempt.error = error
+        if retryable is not None:
+            attempt.retryable = retryable
+        self.stores.attempts.save(attempt)
+
+    def _mark_retry_attempt(self, job_id: str, *, retry_of: str) -> None:
+        attempt = self.stores.attempts.load(job_id, "attempt-1")
+        attempt.kind = JobAttemptKind.RETRY
+        attempt.retry_of = retry_of
+        self.stores.attempts.save(attempt)
 
     def _mark_unfinished_jobs_restorable(self) -> None:
         for job in self.stores.unfinished_jobs():

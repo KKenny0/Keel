@@ -12,7 +12,15 @@ from typing import Any
 from keel_runtime.collaboration import Collaboration
 from keel_runtime.errors import CollaborationNotFoundError, InvalidJobStateError, JobNotFoundError
 from keel_runtime.events import JobEvent
-from keel_runtime.jobs import AgentJob, AgentLoopCheckpoint, ArtifactInput, JobAttempt
+from keel_runtime.jobs import (
+    AgentJob,
+    AgentLoopCheckpoint,
+    ArtifactInput,
+    JobAttempt,
+    JobAttemptKind,
+    JobAttemptStatus,
+    JobStatus,
+)
 from keel_runtime.object_storage import ObjectStorage
 
 
@@ -194,6 +202,8 @@ class JobAttemptStore:
         attempts: list[JobAttempt] = []
         for path in sorted(self.layout.attempts_dir(job_id).glob("*.json")):
             attempts.append(JobAttempt.from_dict(_read_json(path)))
+        if not attempts and self.layout.job_file(job_id).exists():
+            return [_legacy_attempt(AgentJob.from_dict(_read_json(self.layout.job_file(job_id))))]
         return sorted(attempts, key=lambda attempt: attempt.number)
 
 
@@ -508,3 +518,29 @@ class LocalStores:
         for path in _iter_files(root):
             relative_path = str(path.relative_to(root)).replace("\\", "/")
             archive.write(path, f"{archive_root}/{relative_path}")
+
+
+def _legacy_attempt(job: AgentJob) -> JobAttempt:
+    return JobAttempt(
+        id="legacy",
+        job_id=job.id,
+        number=1,
+        kind=JobAttemptKind.INITIAL,
+        status=_attempt_status_from_job_status(job.status),
+        started_at=job.created_at,
+        ended_at=job.updated_at if job.status.is_terminal else None,
+        error=job.error,
+        retryable=job.status in {JobStatus.FAILED, JobStatus.STOPPED, JobStatus.RESTORABLE},
+    )
+
+
+def _attempt_status_from_job_status(status: JobStatus) -> JobAttemptStatus:
+    if status == JobStatus.CREATED:
+        return JobAttemptStatus.CREATED
+    if status in {JobStatus.RUNNING, JobStatus.STOPPING, JobStatus.RESTORABLE}:
+        return JobAttemptStatus.RUNNING
+    if status == JobStatus.SUCCEEDED:
+        return JobAttemptStatus.SUCCEEDED
+    if status == JobStatus.STOPPED:
+        return JobAttemptStatus.STOPPED
+    return JobAttemptStatus.FAILED

@@ -54,13 +54,15 @@ def test_job_attempt_store_lists_attempts(tmp_path: Path) -> None:
     assert stores.build_record(job_id)["attempts"] == [attempt.to_dict()]
 
 
-def test_job_record_defaults_to_no_attempts_or_checkpoints(tmp_path: Path) -> None:
+def test_job_record_defaults_to_initial_attempt_and_no_checkpoints(tmp_path: Path) -> None:
     manager = JobManager(root=tmp_path)
     job_id = manager.create_job(AgentSpec(name="writer"), {"message": "legacy"})
 
     record = manager.stores.build_record(job_id)
 
-    assert record["attempts"] == []
+    assert record["attempts"][0]["id"] == "attempt-1"
+    assert record["attempts"][0]["kind"] == JobAttemptKind.INITIAL.value
+    assert record["attempts"][0]["status"] == JobAttemptStatus.CREATED.value
     assert record["checkpoints"] == {}
 
 
