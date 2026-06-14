@@ -8,14 +8,20 @@ import json
 import os
 import shlex
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
 
+from keel_runtime.agent import Agent
 from keel_runtime.errors import RuntimeExecutionError, RuntimeTimeoutError
-from keel_runtime.events import JobEvent
+from keel_runtime.events import EventType, JobEvent
 from keel_runtime.jobs import AgentJob
+from keel_runtime.loop import AgentLoop
 from keel_runtime.security import is_sensitive_key, redact_text
 from keel_runtime.specs import AgentSpec
+from keel_runtime.stores import LocalStores
+
+AGENT_LOOP_RUNTIME = "agent-loop"
 
 
 class AgentRuntime(Protocol):
@@ -80,6 +86,18 @@ def _format_inprocess_result(result: Any) -> str:
         return json.dumps(result, ensure_ascii=False)
     except TypeError:
         return str(result)
+
+
+def _agent_job_call_args(input: Any) -> tuple[list[Any], dict[str, Any]]:
+    if not isinstance(input, dict) or input.get("runtime") != AGENT_LOOP_RUNTIME:
+        raise RuntimeExecutionError("agent loop job input is invalid")
+    args = input.get("args") or []
+    kwargs = input.get("kwargs") or {}
+    if not isinstance(args, list):
+        raise RuntimeExecutionError("agent loop job args must be a list")
+    if not isinstance(kwargs, dict):
+        raise RuntimeExecutionError("agent loop job kwargs must be an object")
+    return list(args), dict(kwargs)
 
 
 async def _stop_process(process: asyncio.subprocess.Process) -> None:
@@ -244,6 +262,80 @@ class InProcessRuntime:
                 f"in-process handler not registered for agent: {spec.name}"
             )
         return handler
+
+
+class AgentLoopRuntime:
+    """Run a decorated Agent inside JobManager's job lifecycle."""
+
+    def __init__(
+        self,
+        agent: Agent,
+        stores: LocalStores | None = None,
+    ) -> None:
+        self.agent = agent
+        self.stores = stores
+        self._stopping: set[str] = set()
+
+    async def run(self, job: AgentJob, spec: AgentSpec) -> AsyncIterator[JobEvent]:
+        args, kwargs = _agent_job_call_args(job.input)
+        built_input = await self.agent.build_input(*args, **kwargs)
+        config = replace(
+            self.agent.config,
+            job_id=job.id,
+            agent_name=spec.name,
+        )
+        loop = AgentLoop(
+            self.agent.client,
+            self.agent.context_provider,
+            self.agent.tools,
+            config,
+        )
+
+        checkpoint_source = None
+        checkpoint_sink = None
+        if self.stores is not None:
+            checkpoint_sink = self.stores.checkpoints.save
+            if self.stores.checkpoints.exists(job.id):
+                def checkpoint_source() -> Any:
+                    return self.stores.checkpoints.load(job.id)
+
+        yield JobEvent.status(job.id, "agent loop runtime started", agent_name=spec.name)
+        result = await loop.run(
+            built_input,
+            attempt_id="attempt-1",
+            checkpoint_sink=checkpoint_sink,
+            checkpoint_source=checkpoint_source,
+        )
+        for event in result.events:
+            yield event
+
+        if result.status == "succeeded":
+            if self._write_output_json(job, result.output):
+                yield JobEvent(
+                    job_id=job.id,
+                    type=EventType.ARTIFACT,
+                    message="artifact written",
+                    data={"path": "output.json"},
+                )
+            yield JobEvent.status(job.id, "agent loop runtime completed", agent_name=spec.name)
+            return
+
+        raise RuntimeExecutionError(result.error or f"agent loop {result.status}")
+
+    async def stop(self, job_id: str) -> None:
+        self._stopping.add(job_id)
+
+    def _write_output_json(self, job: AgentJob, output: Any) -> bool:
+        if output is None:
+            return False
+        try:
+            text = json.dumps(output, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            return False
+        path = Path(job.artifact_path) / "output.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return True
 
 
 class PiRpcRuntime:

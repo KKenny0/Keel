@@ -35,6 +35,7 @@ from keel_runtime.models import ModelConfig, ModelProvider, ModelUsage, Provider
 from keel_runtime.object_storage import InMemoryObjectStorage, ObjectStorage, S3ObjectStorage
 from keel_runtime.output import OutputValidationError, extract_json, parse_output
 from keel_runtime.runtime import (
+    AgentLoopRuntime,
     AgentRuntime,
     DockerRuntime,
     InProcessRuntime,
@@ -74,6 +75,7 @@ __all__ = [
     "AgentLoop",
     "AgentLoopConfig",
     "AgentLoopResult",
+    "AgentLoopRuntime",
     "AgentContext",
     "ChatClient",
     "ComposedPrompt",

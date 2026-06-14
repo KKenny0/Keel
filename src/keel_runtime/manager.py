@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from keel_runtime.agent import Agent
 from keel_runtime.cleanup import CleanupPolicy
 from keel_runtime.collaboration import (
     Collaboration,
@@ -25,7 +27,13 @@ from keel_runtime.events import EventType, JobEvent, utc_now
 from keel_runtime.jobs import AgentJob, ArtifactInput, JobStatus
 from keel_runtime.models import ModelConfig, ProviderRegistry, parse_model_usage
 from keel_runtime.object_storage import ObjectStorage
-from keel_runtime.runtime import AgentRuntime, PiRpcRuntime, resolve_store_path
+from keel_runtime.runtime import (
+    AGENT_LOOP_RUNTIME,
+    AgentLoopRuntime,
+    AgentRuntime,
+    PiRpcRuntime,
+    resolve_store_path,
+)
 from keel_runtime.security import redact_data, redact_text
 from keel_runtime.specs import AgentSpec
 from keel_runtime.stores import LocalStores
@@ -50,6 +58,7 @@ class JobManager:
         self._queues: dict[str, asyncio.Queue[JobEvent | None]] = {}
         self._stop_requested: set[str] = set()
         self._runtime_specs: dict[str, AgentSpec] = {}
+        self._job_runtimes: dict[str, AgentRuntime] = {}
         self._secret_values: dict[str, list[str]] = {}
         self._mark_unfinished_jobs_restorable()
         self._sync_all_collaborations()
@@ -89,6 +98,36 @@ class JobManager:
         self.stores.jobs.save(job)
         self._append_event(JobEvent.status(job_id, "job created", status=JobStatus.CREATED.value))
         self._record_model_config_warnings(job_id, spec)
+        return job_id
+
+    def create_agent_job(
+        self,
+        agent: Agent,
+        *args: Any,
+        workspace: str | Path | None = None,
+        dependencies: list[str] | None = None,
+        artifact_inputs: list[ArtifactInput | dict[str, Any]] | None = None,
+        agent_kwargs: dict[str, Any] | None = None,
+    ) -> str:
+        input = {
+            "runtime": AGENT_LOOP_RUNTIME,
+            "args": list(args),
+            "kwargs": dict(agent_kwargs or {}),
+        }
+        _assert_json_serializable(input)
+        spec = AgentSpec(
+            name=agent.config.agent_name,
+            system_prompt=agent.config.system_prompt,
+            tools={tool["name"]: tool for tool in agent.tools.to_list()},
+        )
+        job_id = self.create_job(
+            spec,
+            input,
+            workspace=workspace,
+            dependencies=dependencies,
+            artifact_inputs=artifact_inputs,
+        )
+        self._job_runtimes[job_id] = AgentLoopRuntime(agent, self.stores)
         return job_id
 
     def create_task(
@@ -366,10 +405,11 @@ class JobManager:
             self._sync_collaborations_for_job(job_id)
             self._stop_requested.discard(job_id)
             self._runtime_specs.pop(job_id, None)
+            self._job_runtimes.pop(job_id, None)
             self._secret_values.pop(job_id, None)
             return JobStatus.STOPPED
 
-        await self.runtime.stop(job_id)
+        await self._runtime_for_job(job_id).stop(job_id)
         return JobStatus.STOPPING
 
     def get_status(self, job_id: str) -> JobStatus:
@@ -456,6 +496,7 @@ class JobManager:
         output: list[str] = []
         job = self.stores.jobs.load(job_id)
         spec = self._runtime_specs.get(job_id, job.spec)
+        runtime = self._runtime_for_job(job_id)
 
         try:
             await self._prepare_dependencies(job_id)
@@ -465,7 +506,7 @@ class JobManager:
             await self._record_and_publish(
                 JobEvent.status(job_id, "job running", status=job.status.value)
             )
-            async for event in self.runtime.run(job, spec):
+            async for event in runtime.run(job, spec):
                 event = self._sanitize_event(event)
                 if event.type == EventType.OUTPUT:
                     output.append(event.message)
@@ -528,11 +569,15 @@ class JobManager:
         finally:
             self._stop_requested.discard(job_id)
             self._runtime_specs.pop(job_id, None)
+            self._job_runtimes.pop(job_id, None)
             self._secret_values.pop(job_id, None)
             self._sync_collaborations_for_job(job_id)
             await self._finish_queue(job_id)
             self._tasks.pop(job_id, None)
             self._queues.pop(job_id, None)
+
+    def _runtime_for_job(self, job_id: str) -> AgentRuntime:
+        return self._job_runtimes.get(job_id, self.runtime)
 
     def _mark_unfinished_jobs_restorable(self) -> None:
         for job in self.stores.unfinished_jobs():
@@ -883,3 +928,10 @@ class JobManager:
                     target_path=target_path,
                 )
             )
+
+
+def _assert_json_serializable(value: Any) -> None:
+    try:
+        json.dumps(value, ensure_ascii=False)
+    except TypeError as exc:
+        raise TypeError("agent job arguments must be JSON serializable") from exc

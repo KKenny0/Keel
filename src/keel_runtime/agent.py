@@ -64,14 +64,20 @@ class Agent:
             fail_on_gate_timeout=fail_on_gate_timeout,
             memory_provider=memory,
             memory_scope=memory_scope,
+            agent_name=_handler_name(handler),
         )
         update_wrapper(self, handler)
 
     async def __call__(self, *args: Any, **kwargs: Any) -> AgentLoopResult:
+        return await self.loop().run(await self.build_input(*args, **kwargs))
+
+    async def build_input(self, *args: Any, **kwargs: Any) -> AgentInput:
+        """Build normalized loop input without executing the loop."""
+
         built_input = self.handler(*args, **kwargs)
         if inspect.isawaitable(built_input):
             built_input = await built_input
-        return await self.loop().run(_normalize_agent_input(built_input))
+        return _normalize_agent_input(built_input)
 
     def loop(self) -> AgentLoop:
         """Create a lower-level AgentLoop with this agent's defaults."""
